@@ -142,7 +142,7 @@
       seasons: [],
       txs: [],
       loans: [],
-      ui: { donutScope: 'all', sortDesc: true, otherKind: 'in' },
+      ui: { donutScope: 'all', sortDesc: true, otherKind: 'take' },
       savedAt: null,
     };
   }
@@ -556,6 +556,38 @@
     { id: 'vip', cat: 'Stadion', title: 'Renovierung VIP-Bereich', desc: 'Sponsoren wollen Logen auf Europacup-Niveau.', win: ['05-20', '06-25'], pct: [2, 4], chance: 0.25, minBudget: 8000000 },
     { id: 'tribuene', cat: 'Stadion', title: 'Tribünen-Modernisierung', desc: 'Neue Sitzschalen, Dach-Sanierung und barrierefreie Plätze.', win: ['04-01', '06-20'], pct: [5, 9], chance: 0.15, minBudget: 25000000 },
 
+    // Strukturelles Defizit & Pflichtposten (Austria-Realität: jedes Jahr ein Minus)
+    { id: 'lohnneben', start: true, cat: 'Personal', title: 'Lohnnebenkosten & Kommunalsteuer', desc: 'Dienstgeberbeiträge, Kommunalsteuer und Sozialversicherung für das Vereinspersonal.', pct: [1.2, 2] },
+    { id: 'ordnerdienst', start: true, cat: 'Sicherheit', title: 'Ordnerdienst Saisonpauschale', desc: 'Vertrag mit dem Sicherheitsdienst für alle Heimspiele.', pct: [0.8, 1.4] },
+    { id: 'altschulden', start: true, cat: 'Finanzen', title: 'Tilgung Altverbindlichkeiten', desc: 'Die Schulden aus den Jahren vor der Sanierung müssen weiter bedient werden.', pct: [2, 3.5] },
+    { id: 'stadion_kredit_1', cat: 'Finanzen', title: 'Kreditrate Stadionfinanzierung (Herbst)', desc: 'Halbjahresrate für den Ausbau der Generali-Arena.', win: ['10-15', '10-20'], pct: [1.5, 2.5] },
+    { id: 'stadion_kredit_2', cat: 'Finanzen', title: 'Kreditrate Stadionfinanzierung (Frühjahr)', desc: 'Halbjahresrate für den Ausbau der Generali-Arena.', win: ['04-15', '04-20'], pct: [1.5, 2.5] },
+    { id: 'defizit_q1', cat: 'Defizit', title: 'Quartalsabschluss: operatives Minus', desc: 'Der laufende Betrieb kostet mehr, als Ticketing und Sponsoring einbringen.', win: ['09-30', '09-30'], pct: [1.5, 3] },
+    { id: 'defizit_q2', cat: 'Defizit', title: 'Quartalsabschluss: operatives Minus', desc: 'Weihnachtsflaute bei den Einnahmen, die Kosten laufen weiter.', win: ['12-31', '12-31'], pct: [1.5, 3] },
+    { id: 'defizit_q3', cat: 'Defizit', title: 'Quartalsabschluss: operatives Minus', desc: 'Wintertransfers, Trainingslager, wenig Heimspiele – das Konto blutet.', win: ['03-31', '03-31'], pct: [1.5, 3] },
+    { id: 'defizit_q4', cat: 'Defizit', title: 'Jahresabschluss: operatives Minus', desc: 'Der Wirtschaftsprüfer bestätigt: wieder ein Verlustjahr.', win: ['06-30', '06-30'], pct: [2, 4] },
+    { id: 'pruefer', cat: 'Verwaltung', title: 'Wirtschaftsprüfung & Rechtsberatung', desc: 'Jahresabschluss, Lizenzunterlagen und laufende Rechtsberatung.', win: ['09-10', '09-25'], pct: [0.4, 0.8] },
+    { id: 'hauptversammlung', cat: 'Verwaltung', title: 'Hauptversammlung der AG', desc: 'Organisation, Notar und Veröffentlichungspflichten.', win: ['11-15', '12-10'], pct: [0.1, 0.3] },
+    { id: 'berater_retainer', cat: 'Personal', title: 'Beraterhonorare Vertragsverlängerungen', desc: 'Spielerberater kassieren bei Verlängerungen mit – rund 0,8 Mio. pro Jahr bei der echten Austria.', win: ['01-20', '02-15'], pct: [1, 2] },
+    { id: 'sportmedizin', cat: 'Medizin', title: 'Sportmedizin-Vertrag', desc: 'Mannschaftsärzte, MRT-Kontingente und Leistungsdiagnostik.', win: ['08-01', '08-10'], pct: [0.4, 0.8] },
+    { id: 'internat', cat: 'Nachwuchs', title: 'Nachwuchs-Internat', desc: 'Unterkunft, Schule und Betreuung der Akademie-Spieler.', win: ['09-05', '09-15'], pct: [0.6, 1.2] },
+    { id: 'heizung_tz', cat: 'Stadion', title: 'Heizkosten Trainingszentrum', desc: 'Kabinen, Kraftraum und Hallen im Winterbetrieb.', win: ['01-10', '02-20'], pct: [0.3, 0.8] },
+    { id: 'dauerkarten', cat: 'Marketing', title: 'Dauerkarten-Kampagne', desc: 'Plakate, Social Media und Aktionen für die neue Saison.', win: ['06-01', '06-20'], pct: [0.3, 0.7] },
+    { id: 'praemien_stab', cat: 'Personal', title: 'Punkteprämien Betreuerstab', desc: 'Erfolgsprämien für Trainerteam und Staff zur Winterpause.', win: ['12-15', '12-22'], pct: [0.3, 0.9], chance: 0.7 },
+
+    // Pech & Pannen (zufällig)
+    { id: 'sektorsperre', cat: 'Strafen', title: 'Sektorsperre nach Ausschreitungen', desc: 'Ein Heimspiel mit gesperrtem Fansektor: Strafe plus Ticketing-Ausfall.', win: ['09-01', '05-15'], pct: [0.8, 2], chance: 0.25 },
+    { id: 'sponsor_weg', cat: 'Marketing', title: 'Sponsor springt ab', desc: 'Ein Premium-Partner kündigt vorzeitig – die Einnahmen fehlen.', win: ['10-01', '03-31'], pct: [2, 4], chance: 0.25 },
+    { id: 'catering', cat: 'Stadion', title: 'Catering-Pächter insolvent', desc: 'Die ausstehende Pacht ist weg, Übergangsbetrieb kostet extra.', win: ['11-01', '04-30'], pct: [0.5, 1.2], chance: 0.15 },
+    { id: 'cyber', cat: 'Verwaltung', title: 'Cyberangriff auf den Ticketshop', desc: 'IT-Forensik, Datenschutz-Meldung und Shop-Ausfall.', win: ['08-15', '05-31'], pct: [0.4, 1.2], chance: 0.15 },
+    { id: 'reha_ausland', cat: 'Medizin', title: 'Reha im Ausland', desc: 'Ein Leistungsträger lässt sich bei einem Spezialisten in Barcelona behandeln.', win: ['09-01', '04-30'], pct: [0.3, 0.9], chance: 0.35 },
+    { id: 'finanzamt', cat: 'Steuern', title: 'Nachzahlung Finanzamt', desc: 'Die Betriebsprüfung findet Fehler bei der Umsatzsteuer.', win: ['02-01', '05-31'], pct: [0.8, 2.2], chance: 0.2 },
+    { id: 'uefa_auflagen', cat: 'Stadion', title: 'UEFA-Stadionauflagen', desc: 'Nachrüstung bei Flutlicht, Presseplätzen und VAR-Raum für die Lizenz.', win: ['05-01', '06-15'], pct: [1, 3], chance: 0.3, minBudget: 3000000 },
+    { id: 'hybridrasen', cat: 'Stadion', title: 'Hybridrasen für das Trainingszentrum', desc: 'Neuer Hybridrasen, damit die Trainingsplätze den Winter überstehen.', win: ['06-01', '06-25'], pct: [1.5, 3.5], chance: 0.2, minBudget: 6000000 },
+    { id: 'euro_quali_reise', cat: 'Spielbetrieb', title: 'Charterflüge Europacup-Quali', desc: 'Auswärtsspiele in der Qualifikation – Charter, Hotel und UEFA-Auflagen.', win: ['07-15', '08-25'], pct: [0.8, 1.8], chance: 0.4 },
+    { id: 'jubilaeum', cat: 'Verein', title: 'Jubiläumsfeier', desc: 'Festakt, Legendenspiel und Sondertrikots zum Vereinsjubiläum.', win: ['03-01', '03-31'], pct: [0.4, 1], chance: 0.15 },
+    { id: 'bus_panne', cat: 'Spielbetrieb', title: 'Mannschaftsbus-Totalschaden', desc: 'Motorschaden auf der Autobahn – Ersatzbus und Reparatur.', win: ['09-01', '05-15'], pct: [0.3, 0.8], chance: 0.12 },
+
     // Einnahmen (ab und zu)
     { id: 'testspiel', income: true, cat: 'Einnahme', title: 'Testspiel gegen Topklub', desc: 'Freundschaftsspiel mit Antrittsgage gegen {gegner}.', vars: { gegner: ['Borussia Dortmund', 'AC Milan', 'Olympique Lyon', 'Ajax Amsterdam', 'Galatasaray'] }, win: ['07-10', '07-30'], pct: [0.8, 1.8], chance: 0.35 },
     { id: 'merch', income: true, cat: 'Einnahme', title: 'Trikot-Verkaufsschlager', desc: 'Das neue Heimtrikot geht weg wie warme Semmeln.', win: ['08-01', '09-15'], pct: [1, 2.5], chance: 0.45 },
@@ -568,11 +600,12 @@
 
   // Anteil aller Kosten-Events am Budget je Härtestufe (wird pro Saison zufällig gewählt)
   const EVENT_LEVELS = {
-    mild: { label: 'Mild', range: [0.08, 0.13] },
-    normal: { label: 'Normal', range: [0.13, 0.22] },
-    hart: { label: 'Hart', range: [0.24, 0.34] },
+    mild: { label: 'Mild', range: [0.15, 0.25] },
+    normal: { label: 'Normal', range: [0.28, 0.4] },
+    hart: { label: 'Hart', range: [0.42, 0.55] },
+    austria: { label: 'Austria-Realität', range: [0.55, 0.75] },
   };
-  const MAX_SINGLE_EVENT = 0.12; // kein einzelnes Event über 12 % des Budgets
+  const MAX_SINGLE_EVENT = 0.15; // kein einzelnes Event über 15 % des Budgets
 
   /** Deterministischer Zufall: gleiche Saison, gleicher Plan – auch nach Neuladen */
   function seededRandom(seedStr) {
@@ -882,12 +915,12 @@
   // ---------------------------------------------------------------------------
   // Routing
   // ---------------------------------------------------------------------------
-  const VIEWS = ['dashboard', 'verkauf', 'kauf', 'events', 'sonstiges', 'saison', 'protokoll', 'einstellungen'];
+  const VIEWS = ['dashboard', 'verkauf', 'kauf', 'events', 'aktionen', 'saison', 'protokoll', 'einstellungen'];
   let currentView = null;
   function routeFromHash() {
     const h = location.hash.replace('#', '').split('/');
     const v = VIEWS.includes(h[0]) ? h[0] : 'dashboard';
-    if (v === 'sonstiges' && ['in', 'out', 'take', 'repay'].includes(h[1])) state.ui.otherKind = h[1];
+    if (v === 'aktionen' && ['in', 'out', 'take', 'repay'].includes(h[1])) state.ui.otherKind = h[1];
     return v;
   }
   function go(view, sub) {
@@ -922,7 +955,7 @@
       verkauf: () => renderTransfer('sale'),
       kauf: () => renderTransfer('purchase'),
       events: renderEvents,
-      sonstiges: renderOther,
+      aktionen: renderOther,
       saison: renderWizard,
       protokoll: renderLog,
       einstellungen: renderSettings,
@@ -973,7 +1006,7 @@
 
     const alerts = [];
     if (dueEvs.length) alerts.push(`<div class="alert warn">${icon('calendar')}<div><b>${dueEvs.length} Event(s) fällig</b> bis zum Spieldatum ${fmtDay(gd)} (${eur(dueEvs.reduce((a, e) => a + e.amount, 0), true)}).</div><button type="button" class="btn small" data-nav="events">Abhaken</button></div>`);
-    if (row.endNet < 0) alerts.push(`<div class="alert bad">${icon('warn')}<div><b>Realistisches Budget im Minus (${eur(row.endNet)}).</b> Hausregel: keine Käufe mehr, bis wieder Plus. Beim Saisonwechsel fallen ${pct(S().overdraftPct)} Überziehungszinsen an.</div><button type="button" class="btn small" data-nav="sonstiges" data-sub="take">Kredit</button></div>`);
+    if (row.endNet < 0) alerts.push(`<div class="alert bad">${icon('warn')}<div><b>Realistisches Budget im Minus (${eur(row.endNet)}).</b> Hausregel: keine Käufe mehr, bis wieder Plus. Beim Saisonwechsel fallen ${pct(S().overdraftPct)} Überziehungszinsen an.</div><button type="button" class="btn small" data-nav="aktionen" data-sub="take">Kredit</button></div>`);
     else if (afterEvents < 0) alerts.push(`<div class="alert warn">${icon('warn')}<div><b>Achtung:</b> Nach allen geplanten Events wärst du bei ${eur(afterEvents)}. Plane einen Verkauf ein.</div></div>`);
     if (S().ffpEnabled && ffpClass === 'bad') alerts.push(`<div class="alert warn">${icon('warn')}<div><b>Fairplay-Warnung:</b> Ausgaben bei ${nf0.format(Math.min(ffpRatio, 999))} % der Einnahmen (Grenze ${nf0.format(S().ffpLimit)} %).</div></div>`);
 
@@ -1021,7 +1054,7 @@
           <button type="button" class="big-action sell" data-nav="verkauf"><span class="ic">${icon('plus')}</span><span>Verkauf eintragen<small>Nur der Netto-Erlös zählt</small></span></button>
           <button type="button" class="big-action buy" data-nav="kauf"><span class="ic">${icon('plus')}</span><span>Kauf eintragen<small>Ablöse + Berater + Nebenkosten</small></span></button>
           <button type="button" class="big-action season" data-nav="saison"><span class="ic">${icon('flag')}</span><span>Neue Saison starten<small>Neues FC27-Budget, neuer Event-Plan</small></span></button>
-          <button type="button" class="big-action small-link" data-nav="sonstiges"><span class="ic">${icon('coins')}</span><span>Sonstiges: Preisgeld, Sponsor, Kredit …</span></button>
+          <button type="button" class="big-action small-link" data-nav="aktionen"><span class="ic">${icon('coins')}</span><span>Aktionen: Cup-Sieg, Trainer entlassen, Kredit …</span></button>
         </div>
 
         <article class="tile span-8 reveal" style="--i:2">
@@ -1284,15 +1317,77 @@
     });
   }
 
+  // Was im Spiel passiert ist – ein Tipp, Betrag aus dem Saisonbudget abgeleitet
+  const QUICK_ACTIONS = [
+    { id: 'cup_win', sign: 1, pct: 12, title: 'ÖFB-Cup gewonnen', desc: 'Siegprämie vom ÖFB plus Finale-Ticketing.' },
+    { id: 'meister', sign: 1, pct: 25, title: 'Meistertitel', desc: 'Meisterprämie, Sponsor-Boni und mehr TV-Geld.' },
+    { id: 'euro_phase', sign: 1, pct: 40, title: 'Europacup-Ligaphase erreicht', desc: 'UEFA-Startgeld und zusätzliche TV-Einnahmen.' },
+    { id: 'euro_sieg', sign: 1, pct: 6, title: 'Sieg im Europacup', desc: 'UEFA-Siegprämie und volles Haus.' },
+    { id: 'derby_sieg', sign: 1, pct: 2, title: 'Derbysieg gegen Rapid', desc: 'Euphorie: Merchandising und Dauerkarten ziehen an.' },
+    { id: 'meistergruppe', sign: 1, pct: 6, title: 'Meistergruppe erreicht', desc: 'Mehr Topspiele im Frühjahr – mehr TV-Geld und Zuschauer.' },
+    { id: 'quali_gruppe', sign: -1, pct: 15, title: 'Nur Qualifikationsgruppe', desc: 'Weniger TV-Geld, leere Ränge im Frühjahr.' },
+    { id: 'euro_verpasst', sign: -1, pct: 10, title: 'Europacup verpasst', desc: 'Der Hauptsponsor kürzt die Erfolgsklausel.' },
+    { id: 'cup_out', sign: -1, pct: 3, title: 'Früh aus dem Cup', desc: 'Heimspiel-Einnahmen und Rundenprämien fallen weg.' },
+    { id: 'trainer_weg', sign: -1, pct: 12, title: 'Trainer entlassen', desc: 'Abfindung für Cheftrainer und sein Team.' },
+    { id: 'negativserie', sign: -1, pct: 3, title: 'Negativserie (5 Spiele sieglos)', desc: 'Zuschauerschwund und nervöse Sponsoren.' },
+    { id: 'abstiegskampf', sign: -1, pct: 8, title: 'Abstiegskampf', desc: 'Sponsoren verlangen Nachverhandlungen, Dauerkarten brechen ein.' },
+  ];
+  function quickAmount(q) {
+    return q.sign * niceAmount(Math.max(currentSeason().grossBudget, 500000) * q.pct / 100);
+  }
+  function quickActionsHtml() {
+    const tile = (q) => `<button type="button" class="qa ${q.sign > 0 ? 'plus' : 'minus'}" data-action="quick" data-id="${q.id}">
+        <b>${esc(q.title)}</b><small>${esc(q.desc)}</small><span class="num ${cls(quickAmount(q))}">${eur(quickAmount(q), true)}</span></button>`;
+    return `
+      <h2 class="section-title">Im Spiel passiert</h2>
+      <div class="qa-grid">${QUICK_ACTIONS.map(tile).join('')}</div>`;
+  }
+  function openQuickAction(id) {
+    const q = QUICK_ACTIONS.find((x) => x.id === id);
+    if (!q) return;
+    const amt = quickAmount(q);
+    openDialog({
+      title: q.title,
+      body: `<p class="muted" style="margin-top:0">${esc(q.desc)}</p>
+        <form id="quickForm" class="form-grid" novalidate>
+          ${field('qamount', q.sign > 0 ? 'Gutschrift' : 'Abzug', { value: fmtInputMoney(Math.abs(amt)), money: true, suffix: '€', w: 'w6', hint: `Vorschlag: ${nf0.format(q.pct)} % deines FC27-Budgets. Änderbar.` })}
+          ${field('qnote', 'Notiz (optional)', { w: 'w6', attrs: 'autocomplete="off"' })}
+          <button type="submit" hidden tabindex="-1" aria-hidden="true"></button>
+        </form>`,
+      foot: `<button type="button" class="btn" data-c>Abbrechen</button><button type="submit" form="quickForm" class="btn primary">${icon('check')}${q.sign > 0 ? 'Gutschreiben' : 'Abziehen'}</button>`,
+      onMount(d) {
+        d.querySelector('[data-c]').addEventListener('click', () => d.close());
+        const f = d.querySelector('#quickForm');
+        if (matchMedia('(pointer:fine)').matches) { f.elements.qamount.focus(); f.elements.qamount.select(); }
+        f.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const v = parseMoney(f.elements.qamount.value);
+          if (!isFinite(v) || v <= 0) { f.querySelector('[data-err="qamount"]').textContent = 'Betrag größer 0 eingeben.'; f.elements.qamount.classList.add('invalid'); return; }
+          snapshot();
+          const net = q.sign * v;
+          state.txs.push({
+            id: uid(), seasonId: currentSeason().id, ts: Date.now(), type: q.sign > 0 ? 'income' : 'expense', title: q.title,
+            sub: 'Im Spiel passiert', note: f.elements.qnote.value.trim(), category: q.title, gross: 0, net, total: net, deferred: 0,
+            lines: [{ label: q.title, amount: net }, { label: q.desc, amount: 0, text: true }],
+          });
+          save();
+          d.close();
+          toast(`${q.title}: ${eur(net, true)} gebucht.`, { label: 'Rückgängig', fn: undo });
+          renderView(currentView);
+        });
+      },
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Sonstiges (Einnahme, Ausgabe, Kredit)
   // ---------------------------------------------------------------------------
   function renderOther() {
-    const el = $('#view-sonstiges');
-    if (!state.seasons.length) { needSeason(el, 'Sonstiges'); return; }
+    const el = $('#view-aktionen');
+    if (!state.seasons.length) { needSeason(el, 'Aktionen'); return; }
     const k = state.ui.otherKind;
     const loans = openLoans();
-    const kinds = [['in', 'Einnahme', 'plus'], ['out', 'Ausgabe', 'coins'], ['take', 'Kredit aufnehmen', 'bank'], ['repay', 'Kredit tilgen', 'check']];
+    const kinds = [['take', 'Kredit aufnehmen', 'bank'], ['repay', 'Kredit tilgen', 'check'], ['out', 'Eigene Ausgabe', 'coins'], ['in', 'Eigene Einnahme', 'plus']];
     let body;
     if (k === 'in' || k === 'out') {
       body = `
@@ -1323,14 +1418,16 @@
     }
     formShell({
       el, kind: 'other',
-      eyebrow: `Saison ${esc(currentSeason().label)} · kennt FC27 nicht`,
-      title: 'Sonstiges',
-      intro: 'Posten, die das Spiel nicht abbildet: Preisgelder, Sponsoring, Stadionausbau, Leihgebühren, Kredite. Sie wirken nur aufs realistische Budget.',
+      eyebrow: `Saison ${esc(currentSeason().label)} · was FC27 nicht abrechnet`,
+      title: 'Aktionen',
+      intro: 'Ist im Spiel etwas passiert? Tipp es an – der Betrag wird aus deinem FC27-Budget abgeleitet und ist vor dem Buchen änderbar. Darunter: Kredit und eigene Posten.',
       formHtml: `<div class="kind-switch" role="radiogroup" aria-label="Art" style="grid-column:1/-1">
           ${kinds.map(([v, l]) => `<label><input type="radio" name="okind" value="${v}" ${k === v ? 'checked' : ''} ${v === 'repay' && !loans.length ? 'disabled' : ''}><span>${l}</span></label>`).join('')}
         </div>${body}`,
       submitLabel: 'Bestätigen',
     });
+    el.querySelector('.page-intro').insertAdjacentHTML('afterend', quickActionsHtml());
+    el.querySelector('.entry-layout').insertAdjacentHTML('beforebegin', '<h2 class="section-title">Kredit oder eigener Posten</h2>');
   }
 
   // ---------------------------------------------------------------------------
@@ -1345,7 +1442,7 @@
     const t = e.target;
     if (t.name === 'okind') {
       state.ui.otherKind = t.value;
-      history.replaceState(null, '', '#sonstiges/' + t.value);
+      history.replaceState(null, '', '#aktionen/' + t.value);
       renderOther();
       return;
     }
@@ -1363,7 +1460,7 @@
       if (c && c[1] !== state.ui.otherKind) {
         const keep = { category: t.value, amount: f.elements.amount?.value, note: f.elements.note?.value, parts: f.elements.parts?.value };
         state.ui.otherKind = c[1];
-        history.replaceState(null, '', '#sonstiges/' + c[1]);
+        history.replaceState(null, '', '#aktionen/' + c[1]);
         renderOther();
         const nf = $('#entryForm');
         Object.entries(keep).forEach(([k2, v2]) => { if (nf.elements[k2] && v2 != null) nf.elements[k2].value = v2; });
@@ -2266,7 +2363,7 @@
   document.addEventListener('click', async (e) => {
     const nav = e.target.closest('[data-nav]');
     if (nav) {
-      if (nav.dataset.sub && nav.dataset.nav === 'sonstiges') state.ui.otherKind = nav.dataset.sub;
+      if (nav.dataset.sub && nav.dataset.nav === 'aktionen') state.ui.otherKind = nav.dataset.sub;
       if (nav.dataset.nav === 'saison') wiz = null;
       go(nav.dataset.nav, nav.dataset.sub);
       return;
@@ -2283,6 +2380,7 @@
       case 'sort-toggle': state.ui.sortDesc = !state.ui.sortDesc; save({ silent: true }); renderLog(); break;
       case 'wiz-next': wizNext(); break;
       case 'wiz-back': { const steps = wizSteps().map(([n]) => n); wiz.step = steps[Math.max(0, steps.indexOf(wiz.step) - 1)]; renderWizard(); break; }
+      case 'quick': openQuickAction(a.dataset.id); break;
       case 'wiz-reroll': wiz.seed = uid(); renderWizard(); break;
       case 'events-create': {
         const cs = currentSeason();
