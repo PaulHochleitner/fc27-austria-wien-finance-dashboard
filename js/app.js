@@ -930,7 +930,8 @@
   }
   function showView(v) {
     const doSwitch = () => {
-      if (v === 'saison' && currentView !== 'saison') wiz = null;
+      if (v === 'saison' && currentView !== 'saison' && !wiz?.keep) wiz = null;
+      if (wiz) delete wiz.keep;
       currentView = v;
       // Inaktive Views leeren: Formulare nutzen gleiche IDs (#entryForm, #receipt)
       $$('.view').forEach((el) => { const on = el.id === 'view-' + v; el.classList.toggle('active', on); if (!on) el.innerHTML = ''; });
@@ -1700,7 +1701,8 @@
     const prev = rows[rows.length - 1];
     wiz = {
       first,
-      step: first ? 2 : 1,
+      step: first ? 'budget' : 'review',
+      set: JSON.parse(JSON.stringify(state.settings)),
       label: first ? '2026/27' : nextSeasonLabel(prev.s.label),
       budget: first ? '' : fmtInputMoney(prev.s.grossBudget),
       opening: '',
@@ -1709,7 +1711,16 @@
       eventsFor: '',
     };
   }
-  const wizSteps = () => (wiz.first ? [[2, 'Budget'], [3, 'Events'], [4, 'Bestätigen']] : [[1, 'Rückblick'], [2, 'Neues Budget'], [3, 'Events'], [4, 'Bestätigen']]);
+  const wizSteps = () => (wiz.first
+    ? [['budget', 'Budget'], ['settings', 'Einstellungen'], ['events', 'Events'], ['confirm', 'Bestätigen']]
+    : [['review', 'Rückblick'], ['budget', 'Neues Budget'], ['settings', 'Einstellungen'], ['events', 'Events'], ['confirm', 'Bestätigen']]);
+
+  /** Rechnet mit den (noch nicht gespeicherten) Einstellungen aus dem Assistenten */
+  function withDraft(fn) {
+    const orig = state.settings;
+    state.settings = wiz.set;
+    try { return fn(); } finally { state.settings = orig; }
+  }
 
   function wizEnsureEvents() {
     const b = parseMoney(wiz.budget);
@@ -1721,7 +1732,8 @@
     return wiz.events;
   }
 
-  function wizardCalc() {
+  function wizardCalc() { return withDraft(wizardCalcInner); }
+  function wizardCalcInner() {
     const rows = ledger();
     const prev = rows[rows.length - 1];
     const newIdx = rows.length;
@@ -1737,7 +1749,7 @@
     const ratesSum = rates.reduce((a, r) => a + r.net, 0);
     const budget = parseMoney(wiz.budget);
     const b = isFinite(budget) ? budget : 0;
-    const events = wiz.step >= 3 ? wizEnsureEvents() : [];
+    const events = wiz.step === 'events' || wiz.step === 'confirm' ? wizEnsureEvents() : [];
     const startEvents = events.filter((e) => e.start);
     const startSum = startEvents.reduce((a, e) => a + e.amount, 0);
     const laterSum = events.filter((e) => !e.start).reduce((a, e) => a + e.amount, 0);
@@ -1779,7 +1791,7 @@
     const pos = steps.findIndex(([n]) => n === wiz.step);
     let panel = '';
 
-    if (wiz.step === 1) {
+    if (wiz.step === 'review') {
       const p = c.prev;
       const sales = p.txs.filter((t) => t.type === 'sale'), buys = p.txs.filter((t) => t.type === 'purchase');
       const evDone = seasonEvents(p.s).filter((e) => e.status === 'done');
@@ -1799,7 +1811,7 @@
         ${c.openPrev.length ? `<div class="alert warn" style="margin-top:16px">${icon('warn')}<div><b>${c.openPrev.length} Event(s) noch nicht abgehakt</b> (${eur(c.openPrevSum, true)}). Sie werden beim Saisonabschluss automatisch gebucht.</div></div>
           <div class="tile" style="margin-top:10px;transform:none;box-shadow:none">${eventListHtml(c.openPrev)}</div>` : ''}
         ${c.interest.length ? `<div class="sum-box">${c.interest.map((i) => `<div class="r-line"><span>${esc(i.label)}</span><span class="num neg">${eur(i.amount, true)}</span></div>`).join('')}</div>` : ''}`;
-    } else if (wiz.step === 2) {
+    } else if (wiz.step === 'budget') {
       panel = `
         <div class="eyebrow">Schritt ${pos + 1} · Neues FC27-Budget</div>
         <h2 style="margin:8px 0 14px">${wiz.first ? 'Erste Saison anlegen' : 'Was teilt dir FC27 zu?'}</h2>
@@ -1810,7 +1822,9 @@
           <button type="submit" hidden tabindex="-1" aria-hidden="true"></button>
         </form>
         ${c.rates.length ? `<div class="sum-box"><div class="small muted" style="margin-bottom:4px">Fällige Raten in der neuen Saison</div>${c.rates.map((r) => `<div class="r-line"><span>${esc(r.title)}</span><span class="num ${cls(r.net)}">${eur(r.net, true)}</span></div>`).join('')}</div>` : ''}`;
-    } else if (wiz.step === 3) {
+    } else if (wiz.step === 'settings') {
+      panel = wizSettingsHtml(wiz.set, pos);
+    } else if (wiz.step === 'events') {
       const costs = c.events.filter((e) => e.amount < 0), incomes = c.events.filter((e) => e.amount > 0);
       const b = isFinite(c.budget) && c.budget > 0 ? c.budget : 0;
       panel = `
@@ -1844,9 +1858,10 @@
         <p class="small muted" style="margin-top:12px">${wiz.first ? '' : `Saison ${esc(c.prev.s.label)} wird archiviert und bleibt im Protokoll einsehbar. `}Ingame startest du mit ${eur(isFinite(c.budget) ? c.budget : 0)} – so wie FC27 es anzeigt.</p>`;
     }
 
-    const isLast = wiz.step === 4;
+    const isLast = wiz.step === 'confirm';
     el.innerHTML = `
       <div class="view-head"><div><div class="eyebrow">Assistent</div><h1>${wiz.first ? 'Erste Saison' : 'Neue Saison starten'}</h1></div></div>
+      ${pos === 0 ? seasonManageHtml() : ''}
       <ol class="wiz-steps" style="--n:${steps.length}">
         ${steps.map(([, l], i) => `<li class="wiz-step ${i < pos ? 'done' : i === pos ? 'active' : ''}" ${i === pos ? 'aria-current="step"' : ''}><b>${i < pos ? '✓' : i + 1}</b><span>${l}</span></li>`).join('')}
       </ol>
@@ -1858,7 +1873,8 @@
         </div>
       </article>`;
 
-    if (wiz.step === 2) {
+    if (wiz.step === 'settings') bindWizSettings();
+    if (wiz.step === 'budget') {
       const f = $('#wizBudget');
       f.addEventListener('input', () => { wiz.label = f.elements.wlabel.value; wiz.budget = f.elements.wbudget.value; if (f.elements.wopening) wiz.opening = f.elements.wopening.value; });
       f.addEventListener('submit', (e) => { e.preventDefault(); wizNext(); });
@@ -1866,8 +1882,112 @@
     }
   }
 
+
+  // Einstellungen-Schritt im Assistenten: jede Saison alle Regeln neu bestätigen
+  function wizSettingsHtml(set, pos) {
+    const num = (key, label, hint, suffix = '%') => `
+      <div class="set-row"><label for="ws-${key}">${label}${hint ? `<small>${hint}</small>` : ''}</label>
+        <div class="input-affix"><input class="input" id="ws-${key}" data-ws="${key}" inputmode="decimal" value="${fmtInputNum(set[key])}"><em>${suffix}</em></div></div>`;
+    const tog = (key, label, hint, text) => `
+      <div class="set-row"><label>${label}<small>${hint}</small></label>
+        <label class="toggle" style="justify-self:end"><input type="checkbox" data-ws-bool="${key}" ${set[key] ? 'checked' : ''}><span class="sw"></span><span class="t">${text}</span></label></div>`;
+    return `
+      <div class="eyebrow">Schritt ${pos + 1} · Einstellungen für ${esc(wiz.label)}</div>
+      <h2 style="margin:8px 0 6px">Welche Regeln gelten diese Saison?</h2>
+      <p class="small muted" style="margin:0 0 14px">Vorbelegt mit deinen letzten Werten. Änderungen gelten ab dieser Saison und landen auch unter Einstellungen.</p>
+      <div class="settings-grid">
+        <section class="tile" style="transform:none">
+          <div class="tile-head"><h2>Events &amp; Härte</h2></div>
+          <div class="radio-list">
+            ${Object.entries(EVENT_LEVELS).map(([k, l]) => `<label class="radio-card"><input type="radio" name="ws-level" data-ws-radio="eventLevel" value="${k}" ${set.eventLevel === k ? 'checked' : ''}><span><b>${l.label}</b><small>Kosten ca. ${nf0.format(l.range[0] * 100)}–${nf0.format(l.range[1] * 100)} % vom Budget</small></span></label>`).join('')}
+          </div>
+          ${tog('eventIncome', 'Einnahmen-Events', 'Ab und zu ein Plus: Testspiel-Gage, Trikot-Boom …', 'Aktiv')}
+        </section>
+        <section class="tile" style="transform:none">
+          <div class="tile-head"><h2>Steuern &amp; FIFA</h2></div>
+          ${num('koestPct', 'Körperschaftsteuer', 'auf den Verkaufserlös bzw. Gewinn')}
+          ${tog('taxAfterFees', 'KöSt-Basis nach Abgaben', 'Berater &amp; FIFA-Abgaben mindern die Steuerbasis', 'Ein')}
+          ${num('solidarityPct', 'Solidaritätsbeitrag', 'nur internationale Transfers')}
+          ${num('agentSellPct', 'Beraterprovision Verkauf', '')}
+          ${num('agentBuyPct', 'Beraterprovision Kauf', '')}
+        </section>
+        <section class="tile" style="transform:none">
+          <div class="tile-head"><h2>Schulden &amp; Raten</h2></div>
+          ${num('loanPct', 'Kreditzins (Vorbelegung)', 'p. a.')}
+          ${num('overdraftPct', 'Überziehungszins', 'auf negatives Budget beim Saisonwechsel')}
+          ${num('upfrontPct', 'Anzahlung bei Raten', '')}
+          ${num('rateYears', 'Raten-Laufzeit', 'Folgesaisons', 'Sais.')}
+        </section>
+        <section class="tile" style="transform:none">
+          <div class="tile-head"><h2>Übertrag &amp; Fairplay</h2></div>
+          <div class="radio-list">
+            ${[['full', 'Restbudget &amp; Schulden übertragen'], ['debt', 'Nur Schulden übertragen'], ['none', 'Nichts übertragen']]
+              .map(([k, l]) => `<label class="radio-card"><input type="radio" name="ws-carry" data-ws-radio="carryMode" value="${k}" ${set.carryMode === k ? 'checked' : ''}><span><b>${l}</b></span></label>`).join('')}
+          </div>
+          ${tog('ffpEnabled', 'Fairplay-Warnung', 'Warnen, wenn Ausgaben die Grenze überschreiten', 'Aktiv')}
+          ${num('ffpLimit', 'Grenze Ausgaben/Einnahmen', '')}
+        </section>
+        <section class="tile wide" style="transform:none">
+          <div class="tile-head"><h2>Ausbildungsentschädigung</h2><span class="tile-kicker">Staffel</span></div>
+          <table class="mini-table">
+            <thead><tr><th>bis Alter</th><th>% Ablöse</th><th>Pauschale €</th></tr></thead>
+            <tbody>
+              ${set.training.map((t) => `<tr>
+                <td><input class="input" data-wt="${t.id}" data-k="maxAge" inputmode="numeric" value="${t.maxAge}" aria-label="bis Alter"></td>
+                <td><input class="input" data-wt="${t.id}" data-k="pct" inputmode="decimal" value="${fmtInputNum(t.pct)}" aria-label="Prozent"></td>
+                <td><input class="input money" data-wt="${t.id}" data-k="flat" inputmode="decimal" value="${fmtInputMoney(t.flat)}" data-money aria-label="Pauschale"></td></tr>`).join('')}
+            </tbody>
+          </table>
+        </section>
+      </div>`;
+  }
+
+  function bindWizSettings() {
+    const root = $('#view-saison');
+    const onChange = (e) => {
+      const t = e.target;
+      const set = wiz.set;
+      if (t.dataset.ws) {
+        const n = parseNum(t.value);
+        if (!isFinite(n) || n < 0) { t.classList.add('invalid'); return; }
+        t.classList.remove('invalid');
+        set[t.dataset.ws] = t.dataset.ws === 'rateYears' ? Math.max(1, Math.round(n)) : n;
+      } else if (t.dataset.wsBool) {
+        set[t.dataset.wsBool] = t.checked;
+      } else if (t.dataset.wsRadio) {
+        set[t.dataset.wsRadio] = t.value;
+      } else if (t.dataset.wt) {
+        const row = set.training.find((x) => x.id === t.dataset.wt);
+        if (!row) return;
+        const n = t.dataset.k === 'flat' ? parseMoney(t.value || '0') : parseNum(t.value);
+        if (!isFinite(n) || n < 0) { t.classList.add('invalid'); return; }
+        t.classList.remove('invalid');
+        row[t.dataset.k] = n;
+      }
+    };
+    root.querySelector('.settings-grid').addEventListener('input', onChange);
+    root.querySelector('.settings-grid').addEventListener('change', onChange);
+  }
+
+  // Aktuelle Saison löschen oder neu anlegen (Tippfehler beim Budget, falscher Plan …)
+  function seasonManageHtml() {
+    const cur = currentSeason();
+    if (!cur) return '';
+    const n = state.txs.filter((t) => t.seasonId === cur.id).length;
+    return `
+      <div class="alert info season-manage">${icon('calendar')}
+        <div><b>Aktuelle Saison: ${esc(cur.label)}</b> · FC27-Budget ${eur(cur.grossBudget)} · ${n} Eintrag/Einträge.
+        Falsch angelegt? Lösch sie oder leg sie mit neuem Budget, neuen Einstellungen und neuem Event-Plan neu an.</div>
+        <div class="season-manage-actions">
+          <button type="button" class="btn small" data-action="season-redo">${icon('auto')}Neu anlegen</button>
+          <button type="button" class="btn small danger" data-action="season-delete">${icon('trash')}Löschen</button>
+        </div>
+      </div>`;
+  }
+
   function wizNext() {
-    if (wiz.step === 2) {
+    if (wiz.step === 'settings' && $('#view-saison .invalid')) { toast('Bitte die rot markierten Werte korrigieren.'); $('#view-saison .invalid').focus(); return; }
+    if (wiz.step === 'budget') {
       const f = $('#wizBudget');
       const b = parseMoney(f.elements.wbudget.value);
       const label = f.elements.wlabel.value.trim();
@@ -1881,19 +2001,22 @@
       wiz.label = label;
       wiz.budget = f.elements.wbudget.value;
     }
-    wiz.step = Math.min(4, wiz.step + 1);
+    const ids = wizSteps().map(([n]) => n);
+    wiz.step = ids[Math.min(ids.length - 1, ids.indexOf(wiz.step) + 1)];
     renderWizard();
     window.scrollTo({ top: 0 });
   }
 
   function wizConfirm() {
     const c = wizardCalc();
-    if (!isFinite(c.budget) || c.budget < 0) { wiz.step = 2; renderWizard(); return; }
+    if (!isFinite(c.budget) || c.budget < 0) { wiz.step = 'budget'; renderWizard(); return; }
     snapshot();
+    // Einstellungen aus dem Assistenten übernehmen – gelten ab jetzt
+    state.settings = JSON.parse(JSON.stringify(wiz.set));
     const now = Date.now();
     const newSeason = {
       id: uid(), label: wiz.label.trim(), grossBudget: round(c.budget), opening: wiz.first ? round(c.carryNet) : 0, ts: now,
-      events: wizEnsureEvents().map((e) => ({ ...e })), gameDate: isoDate(seasonDate('07-01', seasonStartYear(wiz.label))),
+      events: c.events.map((e) => ({ ...e })), settings: JSON.parse(JSON.stringify(wiz.set)), gameDate: isoDate(seasonDate('07-01', seasonStartYear(wiz.label))),
     };
     let ts = now;
     if (!wiz.first) {
@@ -2152,11 +2275,18 @@
     });
   }
 
-  async function deleteSeason(id) {
+  async function deleteSeason(id, { restart = false } = {}) {
     const s = state.seasons.find((x) => x.id === id);
     if (!s || state.seasons[state.seasons.length - 1].id !== id) return;
     const n = state.txs.filter((t) => t.seasonId === id).length;
-    const ok = await confirmDialog({ title: 'Saison löschen', text: `Saison <b>${esc(s.label)}</b> mit ${n} Eintrag/Einträgen löschen? Der Saisonwechsel davor wird zurückgenommen, die Vorsaison ist wieder aktiv.`, ok: 'Saison löschen', danger: true });
+    const prevNote = state.seasons.length > 1 ? ' Der Saisonwechsel davor wird zurückgenommen, die Vorsaison ist wieder aktiv.' : '';
+    const ok = await confirmDialog({
+      title: restart ? 'Saison neu anlegen' : 'Saison löschen',
+      text: restart
+        ? `Saison <b>${esc(s.label)}</b> mit ${n} Eintrag/Einträgen löschen und direkt neu anlegen? Du gehst den Assistenten mit Budget, Einstellungen und Event-Plan noch einmal durch.${prevNote}`
+        : `Saison <b>${esc(s.label)}</b> mit ${n} Eintrag/Einträgen löschen?${prevNote}`,
+      ok: restart ? 'Löschen & neu anlegen' : 'Saison löschen', danger: true,
+    });
     if (!ok) return;
     snapshot();
     const loanIds = new Set(state.loans.filter((l) => l.seasonId === id).map((l) => l.id));
@@ -2164,6 +2294,18 @@
     state.txs = state.txs.filter((t) => t.seasonId !== id && t.nextSeasonId !== id && !(t.loanId && loanIds.has(t.loanId)));
     state.loans = state.loans.filter((l) => !loanIds.has(l.id));
     save();
+    if (restart) {
+      initWizard();
+      wiz.label = s.label;
+      wiz.budget = fmtInputMoney(s.grossBudget);
+      if (wiz.first) wiz.opening = s.opening ? fmtInputMoney(s.opening) : '';
+      wiz.step = 'budget';
+      wiz.keep = true;
+      if (currentView === 'saison') { delete wiz.keep; renderWizard(); } else go('saison');
+      toast(`Saison ${s.label} gelöscht – jetzt neu anlegen.`, { label: 'Rückgängig', fn: undo });
+      return;
+    }
+    wiz = null;
     renderAll();
     toast(`Saison ${s.label} gelöscht.`, { label: 'Rückgängig', fn: undo });
   }
@@ -2364,7 +2506,7 @@
     const nav = e.target.closest('[data-nav]');
     if (nav) {
       if (nav.dataset.sub && nav.dataset.nav === 'aktionen') state.ui.otherKind = nav.dataset.sub;
-      if (nav.dataset.nav === 'saison') wiz = null;
+      if (nav.dataset.nav === 'saison' && !wiz?.keep) wiz = null;
       go(nav.dataset.nav, nav.dataset.sub);
       return;
     }
@@ -2381,6 +2523,8 @@
       case 'wiz-next': wizNext(); break;
       case 'wiz-back': { const steps = wizSteps().map(([n]) => n); wiz.step = steps[Math.max(0, steps.indexOf(wiz.step) - 1)]; renderWizard(); break; }
       case 'quick': openQuickAction(a.dataset.id); break;
+      case 'season-delete': { const cs = currentSeason(); if (cs) deleteSeason(cs.id); break; }
+      case 'season-redo': { const cs = currentSeason(); if (cs) deleteSeason(cs.id, { restart: true }); break; }
       case 'wiz-reroll': wiz.seed = uid(); renderWizard(); break;
       case 'events-create': {
         const cs = currentSeason();
