@@ -723,3 +723,52 @@ dialog::backdrop { background: rgba(24, 10, 44, .55); backdrop-filter: blur(3px)
   .item-table td.name { grid-column: 2 / -1; }
   .item-table td:nth-child(3) { grid-column: 2; }
 }
+
+/* ---------- v3: Saison-Events ---------- */
+.ev-list { list-style: none; margin: 0; padding: 0; }
+.ev-month { font: 600 .7rem/1 var(--f-mono); letter-spacing: .18em; text-transform: uppercase; color: var(--violet-ink); padding: 16px 0 8px; border-bottom: 1px solid var(--line); }
+.ev-month:first-child { padding-top: 0; }
+.ev {
+  display: grid; grid-template-columns: 40px 64px minmax(0, 1fr) auto 130px; gap: 12px; align-items: center;
+  padding: 12px 4px; border-bottom: 1px dashed var(--line);
+  transition: opacity .3s, background .3s;
+}
+.ev:last-child { border-bottom: 0; }
+.ev.done { opacity: .55; }
+.ev.done .ev-body b { text-decoration: line-through; text-decoration-color: var(--ink-3); }
+.ev.due { background: var(--warn-soft); border-radius: 12px; }
+.ev-check { position: relative; width: 34px; height: 34px; cursor: pointer; }
+.ev-check input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.ev-check span {
+  width: 34px; height: 34px; border-radius: 10px; border: 2px solid var(--line-strong); background: var(--surface);
+  display: grid; place-items: center; color: transparent;
+  transition: background .25s, border-color .25s, color .25s, transform .3s var(--ease-spring);
+}
+.ev-check span svg { width: 20px; height: 20px; }
+.ev-check:hover span { border-color: var(--violet-mid); }
+.ev-check input:checked + span { background: var(--violet); border-color: var(--violet); color: #fff; transform: scale(1.06); }
+.ev-check input:focus-visible + span { outline: 3px solid var(--violet-mid); outline-offset: 2px; }
+.ev-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--violet-mid); justify-self: center; }
+.ev.plus .ev-dot { background: var(--pos); }
+.ev-date { font: 600 .95rem/1.1 var(--f-mono); }
+.ev-date small { display: block; font: 600 .58rem/1.2 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--violet-ink); margin-top: 3px; }
+.ev-body { min-width: 0; }
+.ev-body b { display: block; font-weight: 600; }
+.ev-body small { display: block; color: var(--ink-3); font-size: .82rem; line-height: 1.35; margin-top: 2px; }
+.ev-cat { font: 600 .64rem/1 var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); background: var(--surface-2); padding: 5px 8px; border-radius: 6px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+.ev-cat em { font-style: normal; background: var(--warn); color: #fff; padding: 2px 5px; border-radius: 4px; }
+.ev-amt { text-align: right; font-weight: 600; }
+.gd-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; }
+.level-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.badge.event { background: var(--violet-soft); color: var(--violet-ink); }
+@media (max-width: 760px) {
+  .ev { grid-template-columns: 38px 1fr auto; grid-template-areas: "chk body amt" "chk date cat"; gap: 4px 10px; }
+  .ev-check, .ev-dot { grid-area: chk; }
+  .ev-body { grid-area: body; }
+  .ev-amt { grid-area: amt; }
+  .ev-date { grid-area: date; font-size: .8rem; display: flex; gap: 6px; align-items: baseline; }
+  .ev-date small { margin: 0; }
+  .ev-cat { grid-area: cat; justify-self: end; }
+  .gd-form { grid-template-columns: 1fr; }
+  .level-list { grid-template-columns: 1fr; }
+}

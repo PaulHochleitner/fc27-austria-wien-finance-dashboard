@@ -110,10 +110,10 @@
   // State & Persistenz
   // ---------------------------------------------------------------------------
   const TYPE_LABEL = {
-    sale: 'Verkauf', purchase: 'Kauf', income: 'Einnahme', expense: 'Ausgabe', close: 'Saisonwechsel',
+    sale: 'Verkauf', purchase: 'Kauf', event: 'Event', income: 'Einnahme', expense: 'Ausgabe', close: 'Saisonwechsel',
     rate: 'Rate', loan: 'Kredit', repay: 'Tilgung', fixed: 'Fixposten', interest: 'Zinsen',
   };
-  const FILTER_TYPES = ['sale', 'purchase', 'close', 'income', 'expense', 'rate', 'loan', 'repay'];
+  const FILTER_TYPES = ['sale', 'purchase', 'event', 'close', 'income', 'expense', 'rate', 'loan', 'repay'];
 
   function defaultState() {
     return {
@@ -131,21 +131,14 @@
         carryMode: 'full',
         ffpEnabled: true,
         ffpLimit: 100,
+        eventLevel: 'normal',
+        eventIncome: true,
         training: [
           { id: uid(), maxAge: 18, pct: 3, flat: 90000 },
           { id: uid(), maxAge: 20, pct: 2, flat: 60000 },
           { id: uid(), maxAge: 22, pct: 1, flat: 30000 },
         ],
       },
-      templates: [
-        { id: uid(), name: 'Stadion: Betrieb & Instandhaltung', dir: 'out', amount: 1200000, active: true },
-        { id: uid(), name: 'Trainingsgelände & Nachwuchsakademie', dir: 'out', amount: 800000, active: true },
-        { id: uid(), name: 'Trainerstab & Verwaltung', dir: 'out', amount: 1000000, active: true },
-        { id: uid(), name: 'Scouting', dir: 'out', amount: 250000, active: true },
-        { id: uid(), name: 'Mindestkörperschaftsteuer', dir: 'out', amount: 500, active: true },
-        { id: uid(), name: 'Bundesliga-Ausschüttung (TV-Gelder)', dir: 'in', amount: 1500000, active: false },
-        { id: uid(), name: 'Sponsoring (Trikot, Stadion, Ärmel)', dir: 'in', amount: 1200000, active: false },
-      ],
       seasons: [],
       txs: [],
       loans: [],
@@ -175,7 +168,6 @@
       ...data,
       version: 2,
       settings: { ...def.settings, ...(data.settings || {}), training: Array.isArray(data.settings?.training) ? data.settings.training : def.settings.training },
-      templates: Array.isArray(data.templates) ? data.templates : def.templates,
       seasons: Array.isArray(data.seasons) ? data.seasons : [],
       txs: Array.isArray(data.txs) ? data.txs : [],
       loans: Array.isArray(data.loans) ? data.loans : [],
@@ -187,6 +179,7 @@
   const S = () => state.settings;
 
   function save(opts = {}) {
+    syncEventStatus();
     state.savedAt = Date.now();
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -452,7 +445,7 @@
 
   /** Wodurch unterscheidet sich das realistische Budget vom Ingame-Budget? */
   function diffBuckets(row) {
-    const b = { carry: row.carryNet, tax: 0, fifa: 0, agent: 0, rates: 0, ops: 0, credit: 0 };
+    const b = { carry: row.carryNet, tax: 0, fifa: 0, agent: 0, events: 0, rates: 0, ops: 0, credit: 0 };
     for (const t of row.txs) {
       const d = t.deduct || {};
       if (t.type === 'sale' || t.type === 'purchase') {
@@ -463,6 +456,8 @@
       } else if (t.type === 'income' || t.type === 'expense') {
         b.tax -= d.tax || 0;
         b.ops += t.net + (d.tax || 0);
+      } else if (t.type === 'event') {
+        b.events += t.net;
       } else if (t.type === 'close') {
         b.ops += t.opsNet || 0;
         b.credit += t.interestNet || 0;
@@ -514,6 +509,173 @@
       if (i > 0) out.push({ label: `Überziehungszinsen (${pct(S().overdraftPct)} auf ${eur(-prevRow.endNet)})`, amount: -i });
     }
     return out;
+  }
+
+
+  // ---------------------------------------------------------------------------
+  // Saison-Events: fest hinterlegter Katalog, pro Saison budgetabhängig ausgewürfelt
+  // pct = Anteil vom FC27-Transferbudget (vor Skalierung), win = Zeitfenster MM-DD,
+  // minBudget = Event kommt nur ab diesem Budget, chance = Wahrscheinlichkeit pro Saison
+  // ---------------------------------------------------------------------------
+  const EVENT_CATALOG = [
+    // Zum Saisonstart (01.07.) – werden beim Start automatisch abgezogen
+    { id: 'stadion_betrieb', start: true, cat: 'Stadion', title: 'Stadion-Betriebskosten', desc: 'Strom, Reinigung, Security und Wartung der Generali-Arena für die neue Saison.', pct: [3, 4.5] },
+    { id: 'versicherung', start: true, cat: 'Verwaltung', title: 'Vereinsversicherungen', desc: 'Haftpflicht, Spielerinvalidität und Gebäudeversicherung – Jahresprämie.', pct: [1, 1.8] },
+    { id: 'verwaltung_1', start: true, cat: 'Personal', title: 'Geschäftsstelle & Verwaltung (1. Halbjahr)', desc: 'Gehälter Geschäftsstelle, Ticketing, Marketing und Medienabteilung.', pct: [1.5, 2.5] },
+    { id: 'trainerstab_1', start: true, cat: 'Personal', title: 'Trainer- & Betreuerstab (1. Halbjahr)', desc: 'Co-Trainer, Tormanntrainer, Physios, Zeugwarte – Spielergehälter zahlt FC27 selbst.', pct: [2, 3.2] },
+    { id: 'lizenz', start: true, cat: 'Verband', title: 'Bundesliga-Lizenz & Verbandsbeiträge', desc: 'Lizenzierungsgebühr sowie ÖFB- und Bundesliga-Beiträge.', pct: [0.4, 0.8] },
+    { id: 'koest_min', start: true, cat: 'Steuern', title: 'Mindestkörperschaftsteuer', desc: 'Fällt auch in Verlustjahren an.', flat: 500 },
+
+    // Fixe Termine über die Saison
+    { id: 'frauen', cat: 'Verein', title: 'Frauenteam-Zuschuss', desc: 'Jahresbudget für die Austria-Damen in der ÖFB Frauen-Bundesliga.', win: ['08-15', '08-31'], pct: [0.6, 1.2] },
+    { id: 'akademie', cat: 'Nachwuchs', title: 'Akademie & Young Violets', desc: 'Betriebskosten der Nachwuchsakademie und der Zweitmannschaft.', win: ['09-01', '09-05'], pct: [1.8, 2.8] },
+    { id: 'reise_hin', cat: 'Spielbetrieb', title: 'Reisekosten Hinrunde', desc: 'Bus, Hotels und Verpflegung bei den Auswärtsspielen im Herbst.', win: ['10-01', '10-05'], pct: [0.6, 1.1] },
+    { id: 'trainerstab_2', cat: 'Personal', title: 'Trainer- & Betreuerstab (2. Halbjahr)', desc: 'Zweite Tranche der Gehälter für den Betreuerstab.', win: ['01-01', '01-02'], pct: [2, 3.2] },
+    { id: 'verwaltung_2', cat: 'Personal', title: 'Geschäftsstelle & Verwaltung (2. Halbjahr)', desc: 'Zweite Tranche der Verwaltungsgehälter.', win: ['01-01', '01-02'], pct: [1.5, 2.5] },
+    { id: 'reise_rueck', cat: 'Spielbetrieb', title: 'Reisekosten Rückrunde', desc: 'Bus, Hotels und Verpflegung bei den Auswärtsspielen im Frühjahr.', win: ['03-01', '03-05'], pct: [0.6, 1.1] },
+
+    // Zufällige Kosten
+    { id: 'tl_sommer', cat: 'Spielbetrieb', title: 'Sommer-Trainingslager', desc: 'Quartier, Plätze und Anreise – heuer in {ort}.', vars: { ort: ['Bad Waltersdorf', 'Windischgarsten', 'Bad Tatzmannsdorf', 'Saalfelden', 'Längenfeld'] }, win: ['07-05', '07-20'], pct: [0.8, 1.6], chance: 0.85 },
+    { id: 'tl_winter', cat: 'Spielbetrieb', title: 'Wintertrainingslager', desc: 'Sonne tanken für die Rückrunde in {ort}.', vars: { ort: ['Belek', 'Marbella', 'Side', 'Lagos', 'Dubai'] }, win: ['01-05', '01-15'], pct: [0.8, 1.6], chance: 0.75 },
+    { id: 'rasen', cat: 'Stadion', title: 'Rasensanierung', desc: 'Der Rollrasen hat das Sommerkonzert nicht überlebt.', win: ['08-01', '09-20'], pct: [0.8, 2], chance: 0.55 },
+    { id: 'derby_herbst', cat: 'Sicherheit', title: 'Sicherheitskosten Wiener Derby (Herbst)', desc: 'Zusätzliche Ordner, Polizei und Fantrennung beim Derby gegen Rapid.', win: ['09-15', '11-15'], pct: [0.3, 0.7], chance: 0.9 },
+    { id: 'derby_frueh', cat: 'Sicherheit', title: 'Sicherheitskosten Wiener Derby (Frühjahr)', desc: 'Zusätzliche Ordner, Polizei und Fantrennung beim Derby gegen Rapid.', win: ['02-15', '04-30'], pct: [0.3, 0.7], chance: 0.9 },
+    { id: 'pyro', cat: 'Strafen', title: 'Strafe: Pyrotechnik im Fansektor', desc: 'Der Senat 1 der Bundesliga verhängt eine Geldstrafe.', win: ['08-15', '05-15'], pct: [0.2, 0.6], chance: 0.5 },
+    { id: 'rudel', cat: 'Strafen', title: 'Strafe: Rudelbildung', desc: 'Nach einer Rudelbildung gibt’s Post vom Strafsenat.', win: ['09-01', '04-30'], pct: [0.1, 0.3], chance: 0.25 },
+    { id: 'medizin', cat: 'Medizin', title: 'Medizinische Abteilung', desc: 'Neue Reha-Geräte und Wartung der Kältekammer.', win: ['10-01', '02-28'], pct: [0.5, 1.3], chance: 0.45 },
+    { id: 'winterdienst', cat: 'Stadion', title: 'Winterdienst & Rasenheizung', desc: 'Schneeräumung und Rasenheizung im Dauerbetrieb.', win: ['12-01', '02-10'], pct: [0.4, 1], chance: 0.8 },
+    { id: 'energie', cat: 'Stadion', title: 'Energie-Nachzahlung', desc: 'Die Jahresabrechnung des Energieversorgers ist da.', win: ['02-01', '03-15'], pct: [0.4, 1.2], chance: 0.4 },
+    { id: 'analyse', cat: 'Sportlich', title: 'Datenanalyse- & Video-Software', desc: 'Lizenzen für Leistungsdiagnostik und Videoanalyse.', win: ['08-01', '08-31'], pct: [0.3, 0.8], chance: 0.5 },
+    { id: 'fanbetreuung', cat: 'Verein', title: 'Fanbetreuung & Choreo-Zuschuss', desc: 'Material für die große Choreo in der Osttribüne.', win: ['09-01', '09-30'], pct: [0.15, 0.4], chance: 0.5 },
+    { id: 'wasserschaden', cat: 'Stadion', title: 'Wasserschaden in der Kabine', desc: 'Ein Rohrbruch setzt die Heimkabine unter Wasser.', win: ['11-01', '03-31'], pct: [0.4, 1], chance: 0.15 },
+    { id: 'rechtsstreit', cat: 'Verwaltung', title: 'Arbeitsgerichtsverfahren', desc: 'Ein Ex-Spieler klagt auf ausstehende Prämien – Vergleich plus Anwaltskosten.', win: ['11-01', '05-31'], pct: [0.4, 1.2], chance: 0.15 },
+    { id: 'abfindung', cat: 'Personal', title: 'Abfindung Co-Trainer', desc: 'Ein Co-Trainer geht vorzeitig, der Vertrag wird ausbezahlt.', win: ['10-01', '04-30'], pct: [1, 2.5], chance: 0.15, minBudget: 2000000 },
+    { id: 'bus', cat: 'Spielbetrieb', title: 'Neuer Mannschaftsbus', desc: 'Der alte Bus hat ausgedient – der neue kommt in Violett.', win: ['07-15', '08-31'], pct: [1.5, 3], chance: 0.1, minBudget: 4000000 },
+    { id: 'flutlicht', cat: 'Stadion', title: 'LED-Flutlicht-Wartung', desc: 'Pflichtprüfung und Tausch defekter Module für TV-taugliches Licht.', win: ['10-15', '11-30'], pct: [0.8, 2], chance: 0.3, minBudget: 3000000 },
+    { id: 'kabine', cat: 'Stadion', title: 'Kabinen-Umbau', desc: 'Neue Kabine mit Eisbad und Taktikraum.', win: ['06-01', '06-25'], pct: [1, 2.5], chance: 0.2, minBudget: 5000000 },
+    { id: 'vip', cat: 'Stadion', title: 'Renovierung VIP-Bereich', desc: 'Sponsoren wollen Logen auf Europacup-Niveau.', win: ['05-20', '06-25'], pct: [2, 4], chance: 0.25, minBudget: 8000000 },
+    { id: 'tribuene', cat: 'Stadion', title: 'Tribünen-Modernisierung', desc: 'Neue Sitzschalen, Dach-Sanierung und barrierefreie Plätze.', win: ['04-01', '06-20'], pct: [5, 9], chance: 0.15, minBudget: 25000000 },
+
+    // Einnahmen (ab und zu)
+    { id: 'testspiel', income: true, cat: 'Einnahme', title: 'Testspiel gegen Topklub', desc: 'Freundschaftsspiel mit Antrittsgage gegen {gegner}.', vars: { gegner: ['Borussia Dortmund', 'AC Milan', 'Olympique Lyon', 'Ajax Amsterdam', 'Galatasaray'] }, win: ['07-10', '07-30'], pct: [0.8, 1.8], chance: 0.35 },
+    { id: 'merch', income: true, cat: 'Einnahme', title: 'Trikot-Verkaufsschlager', desc: 'Das neue Heimtrikot geht weg wie warme Semmeln.', win: ['08-01', '09-15'], pct: [1, 2.5], chance: 0.45 },
+    { id: 'zuschauer', income: true, cat: 'Einnahme', title: 'Zuschauer-Plus', desc: 'Ausverkauftes Haus nach dem Derbysieg – Mehreinnahmen beim Ticketing.', win: ['09-20', '04-30'], pct: [0.4, 1], chance: 0.3 },
+    { id: 'tv_bonus', income: true, cat: 'Einnahme', title: 'TV-Bonus Topspiele', desc: 'Mehr Live-Übertragungen als geplant – Bonus vom Rechteinhaber.', win: ['12-01', '12-20'], pct: [0.6, 1.5], chance: 0.35 },
+    { id: 'solidar_in', income: true, cat: 'Einnahme', title: 'Eingehender Solidaritätsbeitrag', desc: 'Ein ehemaliger Akademie-Spieler wechselt im Ausland – die Austria kassiert mit.', win: ['07-15', '06-15'], pct: [0.3, 1.2], chance: 0.25 },
+    { id: 'sponsor_bonus', income: true, cat: 'Einnahme', title: 'Sponsor-Erfolgsprämie', desc: 'Der Hauptsponsor zahlt einen Bonus für die Platzierung.', win: ['05-15', '06-10'], pct: [1, 3], chance: 0.45 },
+    { id: 'konzert', income: true, cat: 'Einnahme', title: 'Stadionvermietung Konzert', desc: 'Ein Open-Air-Konzert in der Generali-Arena bringt Miete.', win: ['06-01', '06-30'], pct: [0.8, 2], chance: 0.3 },
+  ];
+
+  // Anteil aller Kosten-Events am Budget je Härtestufe (wird pro Saison zufällig gewählt)
+  const EVENT_LEVELS = {
+    mild: { label: 'Mild', range: [0.08, 0.13] },
+    normal: { label: 'Normal', range: [0.13, 0.22] },
+    hart: { label: 'Hart', range: [0.24, 0.34] },
+  };
+  const MAX_SINGLE_EVENT = 0.12; // kein einzelnes Event über 12 % des Budgets
+
+  /** Deterministischer Zufall: gleiche Saison, gleicher Plan – auch nach Neuladen */
+  function seededRandom(seedStr) {
+    let h = 1779033703 ^ seedStr.length;
+    for (let i = 0; i < seedStr.length; i++) {
+      h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353);
+      h = (h << 13) | (h >>> 19);
+    }
+    let a = h >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function niceAmount(x) {
+    const a = Math.abs(x);
+    const step = a < 100000 ? 1000 : a < 1000000 ? 5000 : 10000;
+    return Math.max(1000, Math.round(a / step) * step);
+  }
+  function seasonStartYear(label) {
+    const m = String(label || '').match(/(\d{4})/);
+    return m ? Number(m[1]) : new Date().getFullYear();
+  }
+  /** MM-DD innerhalb der Saison (Juli–Juni) in ein echtes Datum umrechnen */
+  function seasonDate(mmdd, startYear) {
+    const [m, d] = mmdd.split('-').map(Number);
+    return new Date(Date.UTC(m >= 7 ? startYear : startYear + 1, m - 1, d));
+  }
+  const isoDate = (dt) => dt.toISOString().slice(0, 10);
+  const fmtDay = (iso) => { const [y, m, d] = iso.split('-'); return `${d}.${m}.${y}`; };
+  const fmtDayShort = (iso) => { const [, m, d] = iso.split('-'); return `${d}.${m}.`; };
+  const MONTHS = ['Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+
+  /** Event-Plan für eine Saison erzeugen – budgetabhängig, abwechslungsreich, reproduzierbar */
+  function generateEvents(budget, label, seed) {
+    const rand = seededRandom(String(seed));
+    const s = S();
+    const base = Math.max(round(budget), 500000);
+    const y = seasonStartYear(label);
+    const picked = [];
+    for (const e of EVENT_CATALOG) {
+      if (e.income && !s.eventIncome) continue;
+      if (e.minBudget && budget < e.minBudget) continue;
+      if (rand() > (e.chance ?? 1)) continue;
+      const pctVal = e.pct ? e.pct[0] + rand() * (e.pct[1] - e.pct[0]) : 0;
+      let date;
+      if (e.start) date = isoDate(seasonDate('07-01', y));
+      else {
+        const from = seasonDate(e.win[0], y).getTime();
+        const to = seasonDate(e.win[1], y).getTime();
+        date = isoDate(new Date(from + Math.floor(rand() * ((to - from) / 86400000 + 1)) * 86400000));
+      }
+      let desc = e.desc;
+      if (e.vars) Object.entries(e.vars).forEach(([k, list]) => { desc = desc.replace(`{${k}}`, list[Math.floor(rand() * list.length)]); });
+      picked.push({ e, raw: e.flat ? e.flat : (base * pctVal) / 100, date, desc });
+    }
+    // Kosten auf einen zufälligen, gesunden Anteil des Budgets skalieren
+    const lvl = EVENT_LEVELS[s.eventLevel] || EVENT_LEVELS.normal;
+    const target = base * (lvl.range[0] + rand() * (lvl.range[1] - lvl.range[0]));
+    const scalable = picked.filter((p) => !p.e.income && !p.e.flat).reduce((a, p) => a + p.raw, 0);
+    const factor = scalable > 0 ? target / scalable : 1;
+    return picked.map((p) => {
+      let amt = p.e.flat ? p.raw : p.e.income ? p.raw : p.raw * factor;
+      if (!p.e.flat) amt = niceAmount(Math.min(amt, base * MAX_SINGLE_EVENT));
+      return {
+        id: uid(), cid: p.e.id, title: p.e.title, desc: p.desc, cat: p.e.cat, date: p.date,
+        start: !!p.e.start, amount: p.e.income ? amt : -amt, status: 'open', txId: null,
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date) || a.amount - b.amount);
+  }
+
+  function seasonEvents(season) { return Array.isArray(season?.events) ? season.events : []; }
+  function openEventsSum(season) { return seasonEvents(season).filter((e) => e.status !== 'done').reduce((a, e) => a + e.amount, 0); }
+
+  /** Event abhaken (bucht es) oder wieder öffnen (storniert die Buchung) */
+  function setEventDone(season, ev, done, { auto = false, ts = Date.now(), nextSeasonId } = {}) {
+    if (done && ev.status !== 'done') {
+      const tx = {
+        id: uid(), seasonId: season.id, ts, type: 'event', title: ev.title, sub: `${ev.cat} · ${fmtDay(ev.date)}${auto ? ' · automatisch' : ''}`,
+        gross: 0, net: ev.amount, total: ev.amount, eventId: ev.id, auto: auto && ev.start,
+        lines: [{ label: ev.title, amount: ev.amount }, { label: ev.desc, amount: 0, muted: true, text: true }],
+      };
+      if (nextSeasonId) tx.nextSeasonId = nextSeasonId;
+      state.txs.push(tx);
+      ev.status = 'done';
+      ev.txId = tx.id;
+    } else if (!done && ev.status === 'done') {
+      state.txs = state.txs.filter((t) => t.id !== ev.txId);
+      ev.status = 'open';
+      ev.txId = null;
+    }
+  }
+
+  /** Nach Löschen/Import: Event-Status an vorhandene Buchungen angleichen */
+  function syncEventStatus() {
+    const ids = new Set(state.txs.map((t) => t.id));
+    for (const s of state.seasons) {
+      for (const ev of seasonEvents(s)) {
+        if (ev.status === 'done' && !ids.has(ev.txId)) { ev.status = 'open'; ev.txId = null; }
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -720,7 +882,7 @@
   // ---------------------------------------------------------------------------
   // Routing
   // ---------------------------------------------------------------------------
-  const VIEWS = ['dashboard', 'verkauf', 'kauf', 'sonstiges', 'saison', 'protokoll', 'einstellungen'];
+  const VIEWS = ['dashboard', 'verkauf', 'kauf', 'events', 'sonstiges', 'saison', 'protokoll', 'einstellungen'];
   let currentView = null;
   function routeFromHash() {
     const h = location.hash.replace('#', '').split('/');
@@ -759,6 +921,7 @@
       dashboard: renderDashboard,
       verkauf: () => renderTransfer('sale'),
       kauf: () => renderTransfer('purchase'),
+      events: renderEvents,
       sonstiges: renderOther,
       saison: renderWizard,
       protokoll: renderLog,
@@ -801,9 +964,17 @@
     const recent = [...state.txs].sort((a, c) => c.ts - a.ts).slice(0, 6);
     const scope = state.ui.donutScope;
     const netShare = row.endGross > 0 ? Math.max(0, Math.min(1, row.endNet / row.endGross)) : 0;
+    const evs = seasonEvents(s);
+    const openEvs = evs.filter((e) => e.status !== 'done');
+    const openSum = openEventsSum(s);
+    const afterEvents = row.endNet + openSum;
+    const gd = s.gameDate || '';
+    const dueEvs = gd ? openEvs.filter((e) => e.date <= gd) : [];
 
     const alerts = [];
+    if (dueEvs.length) alerts.push(`<div class="alert warn">${icon('calendar')}<div><b>${dueEvs.length} Event(s) fällig</b> bis zum Spieldatum ${fmtDay(gd)} (${eur(dueEvs.reduce((a, e) => a + e.amount, 0), true)}).</div><button type="button" class="btn small" data-nav="events">Abhaken</button></div>`);
     if (row.endNet < 0) alerts.push(`<div class="alert bad">${icon('warn')}<div><b>Realistisches Budget im Minus (${eur(row.endNet)}).</b> Hausregel: keine Käufe mehr, bis wieder Plus. Beim Saisonwechsel fallen ${pct(S().overdraftPct)} Überziehungszinsen an.</div><button type="button" class="btn small" data-nav="sonstiges" data-sub="take">Kredit</button></div>`);
+    else if (afterEvents < 0) alerts.push(`<div class="alert warn">${icon('warn')}<div><b>Achtung:</b> Nach allen geplanten Events wärst du bei ${eur(afterEvents)}. Plane einen Verkauf ein.</div></div>`);
     if (S().ffpEnabled && ffpClass === 'bad') alerts.push(`<div class="alert warn">${icon('warn')}<div><b>Fairplay-Warnung:</b> Ausgaben bei ${nf0.format(Math.min(ffpRatio, 999))} % der Einnahmen (Grenze ${nf0.format(S().ffpLimit)} %).</div></div>`);
 
     const bucketRows = [
@@ -811,13 +982,15 @@
       ['Körperschaftsteuer', b.tax],
       ['FIFA-Abgaben (Solidarität, Ausbildung)', b.fifa],
       ['Berater & Handgelder', b.agent],
+      ['Saison-Events', b.events],
       ['Ratenzahlungen (zeitl. Verschiebung)', b.rates],
-      ['Fixkosten & sonstige Posten', b.ops],
+      ['Sonstige Posten', b.ops],
       ['Kredite & Zinsen', b.credit],
     ].filter(([, v]) => round(v) !== 0);
 
     const upGroups = {};
     up.forEach((u) => { (upGroups[u.ahead] ||= []).push(u); });
+    const nextEvs = openEvs.slice(0, 5);
 
     el.innerHTML = `
       ${backupBanner()}
@@ -830,7 +1003,7 @@
             <div>
               <div class="lbl">Realistisches Budget</div>
               <div class="hero-amount ${row.endNet < 0 ? 'neg' : ''}" id="heroAmount" data-v="0">${eur(0)}</div>
-              <small>Nach Steuern, FIFA-Abgaben, Beratern &amp; Fixkosten – diese Zahl zählt.</small>
+              <small>So viel darfst du im Spiel wirklich ausgeben.</small>
             </div>
             <div class="ingame">
               <div class="lbl">Ingame-Budget (FC27)</div>
@@ -840,26 +1013,42 @@
           </div>
           <div class="hero-gap">
             <div class="hero-gap-bar" aria-hidden="true"><i data-scale="${netShare}"></i></div>
-            <div class="hero-gap-text"><span>Differenz zum Spiel <b>${eur(diff, true)}</b></span><span>Zugeteilt diese Saison <b>${eur(s.grossBudget)}</b> · Übertrag <b>${eur(row.carryNet, true)}</b></span></div>
+            <div class="hero-gap-text"><span>Differenz zum Spiel <b>${eur(diff, true)}</b></span><span>Nach allen geplanten Events <b>${eur(afterEvents)}</b></span></div>
           </div>
         </article>
 
         <div class="action-stack reveal" style="--i:1">
-          <button type="button" class="big-action sell" data-nav="verkauf"><span class="ic">${icon('plus')}</span><span>Verkauf eintragen<small>Ablöse aus FC27 – App zieht Abgaben ab</small></span></button>
+          <button type="button" class="big-action sell" data-nav="verkauf"><span class="ic">${icon('plus')}</span><span>Verkauf eintragen<small>Nur der Netto-Erlös zählt</small></span></button>
           <button type="button" class="big-action buy" data-nav="kauf"><span class="ic">${icon('plus')}</span><span>Kauf eintragen<small>Ablöse + Berater + Nebenkosten</small></span></button>
-          <button type="button" class="big-action season" data-nav="saison"><span class="ic">${icon('flag')}</span><span>Neue Saison starten<small>Fixkosten abziehen, neues FC27-Budget</small></span></button>
+          <button type="button" class="big-action season" data-nav="saison"><span class="ic">${icon('flag')}</span><span>Neue Saison starten<small>Neues FC27-Budget, neuer Event-Plan</small></span></button>
           <button type="button" class="big-action small-link" data-nav="sonstiges"><span class="ic">${icon('coins')}</span><span>Sonstiges: Preisgeld, Sponsor, Kredit …</span></button>
         </div>
 
-        <article class="tile reveal" style="--i:2">
+        <article class="tile span-8 reveal" style="--i:2">
+          <div class="tile-head"><h2>Nächste Events</h2><button type="button" class="btn small ghost" data-nav="events">Alle ${evs.length} Events ${icon('arrow')}</button></div>
+          ${evs.length
+            ? (nextEvs.length ? eventListHtml(nextEvs, { checkable: true, gameDate: gd }) : '<p class="empty">Alle Events dieser Saison sind erledigt.</p>')
+            : `<p class="empty">Noch kein Event-Plan für diese Saison.</p><button type="button" class="btn small primary" data-action="events-create">Event-Plan erstellen</button>`}
+        </article>
+
+        <article class="tile reveal" style="--i:3">
+          <div class="tile-head"><h2>Ausblick Saisonende</h2><span class="tile-kicker">ohne weitere Transfers</span></div>
+          <ul class="stat-list">
+            <li><span>Realistisch jetzt</span><span class="num ${cls(row.endNet)}">${eur(row.endNet)}</span></li>
+            <li><span>Offene Events (${openEvs.length})</span><span class="num ${cls(openSum)}">${eur(openSum, true)}</span></li>
+          </ul>
+          <div class="gap-diff"><span>Am Saisonende</span><strong class="${afterEvents < 0 ? 'neg' : ''}">${eur(afterEvents)}</strong></div>
+        </article>
+
+        <article class="tile reveal" style="--i:4">
           <div class="tile-head"><h2>Wohin geht die Differenz?</h2><span class="tile-kicker">Saison ${esc(s.label)}</span></div>
           <ul class="stat-list">
-            ${bucketRows.length ? bucketRows.map(([l, v]) => `<li><span>${l}</span><span class="num ${cls(v)}">${eur(v, true)}</span></li>`).join('') : '<li class="empty">Noch keine Abweichung – trag deinen ersten Transfer ein.</li>'}
+            ${bucketRows.length ? bucketRows.map(([l, v]) => `<li><span>${l}</span><span class="num ${cls(v)}">${eur(v, true)}</span></li>`).join('') : '<li class="empty">Noch keine Abweichung.</li>'}
           </ul>
           <div class="gap-diff"><span>Realistisch − Ingame</span><strong>${eur(diff, true)}</strong></div>
         </article>
 
-        <article class="tile reveal" style="--i:3">
+        <article class="tile reveal" style="--i:5">
           <div class="tile-head"><h2>Schulden</h2><span class="tile-kicker">inkl. Zinslast</span></div>
           <div class="stat-big num ${debtLoans + overdraft > 0 ? 'neg' : ''}">${eur(-(debtLoans + overdraft))}</div>
           <ul class="stat-list">
@@ -870,7 +1059,7 @@
           ${!loans.length && !overdraft ? '<p class="empty">Schuldenfrei.</p>' : ''}
         </article>
 
-        <article class="tile reveal" style="--i:4">
+        <article class="tile reveal" style="--i:6">
           <div class="tile-head"><h2>Offene Raten</h2><span class="tile-kicker">nächste Saisons</span></div>
           ${up.length ? Object.entries(upGroups).slice(0, 3).map(([ahead, list]) => `
             <div class="small muted" style="margin-top:8px"><b>${esc(nextSeasonLabel(s.label, Number(ahead)))}</b> · Saldo <span class="num ${cls(list.reduce((a, u) => a + u.amount, 0))}">${eur(list.reduce((a, u) => a + u.amount, 0), true)}</span></div>
@@ -878,14 +1067,14 @@
             : '<p class="empty">Keine offenen Raten. Ratenzahlung kannst du bei Kauf/Verkauf wählen.</p>'}
         </article>
 
-        <article class="tile span-8 reveal" style="--i:5">
+        <article class="tile span-8 reveal" style="--i:7">
           <div class="tile-head"><h2>Budgetverlauf</h2>
             <div class="chart-legend"><span><i style="background:var(--c-net)"></i>Realistisch</span><span><i class="dash"></i>Ingame (FC27)</span></div>
           </div>
           <div class="chart-wrap" id="lineChart"></div>
         </article>
 
-        <article class="tile reveal" style="--i:6">
+        <article class="tile reveal" style="--i:8">
           <div class="tile-head"><h2>Wohin geht der Erlös?</h2>
             <div class="seg" role="group" aria-label="Zeitraum">
               <button type="button" data-action="donut-scope" data-scope="season" aria-pressed="${scope === 'season'}">Saison</button>
@@ -895,12 +1084,12 @@
           <div id="donutChart"></div>
         </article>
 
-        <article class="tile span-8 reveal" style="--i:7">
+        <article class="tile span-8 reveal" style="--i:9">
           <div class="tile-head"><h2>Letzte Einträge</h2><button type="button" class="btn small ghost" data-nav="protokoll">Protokoll ${icon('arrow')}</button></div>
           ${recent.length ? `<ul class="tx-list">${recent.map((t) => txRow(t, false)).join('')}</ul>` : '<p class="empty">Noch keine Einträge in dieser Saison.</p>'}
         </article>
 
-        <article class="tile reveal" style="--i:8">
+        <article class="tile reveal" style="--i:10">
           <div class="tile-head"><h2>Saison-Bilanz</h2><span class="tile-kicker">${S().ffpEnabled ? 'Fairplay-Check' : 'Ein/Aus'}</span></div>
           <ul class="stat-list">
             <li><span>Einnahmen inkl. FC27-Budget</span><span class="num pos">${eur(row.incOp)}</span></li>
@@ -967,7 +1156,7 @@
       <div class="tx-detail"><div><div class="tx-detail-inner">
         <div>
           ${t.gross ? `<div class="r-line muted-line"><span>Ingame-Wirkung (FC27)</span><span class="num">${eur(t.gross, true)}</span></div>` : ''}
-          ${(t.lines || []).map((l) => `<div class="r-line ${l.muted ? 'muted-line' : ''}"><span>${esc(l.label)}</span><span class="num ${l.muted ? '' : cls(l.amount)}">${l.muted ? eur(l.amount) : eur(l.amount, true)}</span></div>`).join('')}
+          ${(t.lines || []).map((l) => (l.text ? `<div class="r-line muted-line"><span>${esc(l.label)}</span></div>` : `<div class="r-line ${l.muted ? 'muted-line' : ''}"><span>${esc(l.label)}</span><span class="num ${l.muted ? '' : cls(l.amount)}">${l.muted ? eur(l.amount) : eur(l.amount, true)}</span></div>`)).join('')}
           ${t.total !== undefined && t.total !== t.net ? `<div class="r-line"><span>Netto gesamt</span><span class="num ${cls(t.total)}">${eur(t.total, true)}</span></div>` : ''}
           <div class="r-line total"><span>Wirkt aufs realistische Budget</span><span class="num ${cls(net)}">${eur(net, true)}</span></div>
           ${t.schedule?.length ? `<div class="r-sched">${t.schedule.map((r, i) => `<div><span>Rate ${i + 2}/${t.schedule.length + 1} · Saison +${r.offset}</span><span class="num ${cls(r.amount)}">${eur(r.amount, true)}</span></div>`).join('')}</div>` : ''}
@@ -1089,7 +1278,7 @@
       eyebrow: `Saison ${esc(currentSeason().label)} · ${isSale ? 'Spieler abgeben' : 'Spieler holen'}`,
       title,
       intro: isSale
-        ? 'Trag die Verkaufssumme ein, die FC27 dir anzeigt. Rechts siehst du sofort, was nach Steuer, FIFA-Abgaben und Berater realistisch im Budget ankommt.'
+        ? 'Trag die Verkaufssumme ein, die FC27 dir anzeigt. Dem realistischen Budget wird nur der Netto-Erlös gutgeschrieben – ohne Körperschaftsteuer, FIFA-Abgaben und Berater.'
         : 'Trag die Ablöse aus FC27 ein. Rechts siehst du die Gesamtbelastung inklusive Berater, Ausbildungsentschädigung und Handgeld.',
       submitLabel: 'Bestätigen',
     });
@@ -1112,7 +1301,6 @@
         ${field('note', 'Notiz', { w: 'w4', attrs: 'autocomplete="off"' })}
         ${field('parts', 'Verteilen auf Saisons', { w: 'w2 half', value: '1', attrs: 'inputmode="numeric"', hint: 'z. B. Stadionausbau über 5' })}
         <div class="toggle-row">
-          ${toggle('recurring', 'Jedes Jahr beim Saisonwechsel vorschlagen')}
           ${k === 'in' ? toggle('taxed', `KöSt abziehen (${pct(S().koestPct)})`) : ''}
         </div>`;
     } else if (k === 'take') {
@@ -1237,7 +1425,6 @@
         amount: parseMoney(val('amount')),
         note: val('note').trim(),
         parts: parseInt(val('parts'), 10) || 1,
-        recurring: chk('recurring'),
         taxed: chk('taxed'),
       };
       if (!v.category) errors.category = 'Kategorie wählen oder eintippen.';
@@ -1302,7 +1489,7 @@
       if (c.tax) lines.push({ label: `Körperschaftsteuer (${pct(s.koestPct)})`, amount: -c.tax });
       if (c.sched.length) lines.push({ label: `Davon jetzt (1/${c.parts})`, amount: c.now, muted: true });
       return {
-        type: v.kind === 'in' ? 'income' : 'expense', title: v.category, sub: v.recurring ? 'wird jährlich vorgeschlagen' : '', note: v.note,
+        type: v.kind === 'in' ? 'income' : 'expense', title: v.category, sub: '', note: v.note,
         gross: 0, net: c.now, total: c.total, deferred: c.now - c.total, lines, schedule: c.sched, deduct: c.tax ? { tax: c.tax } : undefined,
         category: v.category,
       };
@@ -1364,6 +1551,7 @@
         <div class="sum-box" style="margin-top:14px">
           ${tx.gross ? `<div class="r-line"><span>FC27 bucht</span><span class="num">${eur(tx.gross, true)}</span></div>` : ''}
           <div class="r-line"><span>Realistisches Budget danach</span><span class="num ${cls(after)}"><b>${eur(after)}</b></span></div>
+          ${openEventsSum(cur) ? `<div class="r-line"><span>… nach allen offenen Events</span><span class="num ${cls(after + openEventsSum(cur))}">${eur(after + openEventsSum(cur))}</span></div>` : ''}
         </div>
         ${kind === 'purchase' && after < 0 ? `<div class="alert bad" style="margin-top:12px">${icon('warn')}<div>Dieser Kauf bringt dein realistisches Budget ins Minus.</div></div>` : ''}
         <div class="r-note">${note}</div>`;
@@ -1399,9 +1587,6 @@
       rec.loanId = loan.id;
       delete rec._loan;
     }
-    if (r.kind === 'other' && r.v.recurring) {
-      state.templates.push({ id: uid(), name: r.v.category, dir: r.v.kind, amount: r.v.amount, active: true });
-    }
     state.txs.push(rec);
     save();
     toast(`${TYPE_LABEL[rec.type]} bestätigt: ${rec.title} (${eur(rec.net, true)})`, { label: 'Rückgängig', fn: undo });
@@ -1418,49 +1603,89 @@
     const prev = rows[rows.length - 1];
     wiz = {
       first,
-      step: first ? 3 : 1,
+      step: first ? 2 : 1,
       label: first ? '2026/27' : nextSeasonLabel(prev.s.label),
       budget: first ? '' : fmtInputMoney(prev.s.grossBudget),
       opening: '',
-      items: state.templates.map((t) => ({ id: t.id, name: t.name, dir: t.dir, amount: round(t.amount), on: !!t.active, parts: 1, tpl: true })),
+      seed: uid(),
+      events: null,
+      eventsFor: '',
     };
+  }
+  const wizSteps = () => (wiz.first ? [[2, 'Budget'], [3, 'Events'], [4, 'Bestätigen']] : [[1, 'Rückblick'], [2, 'Neues Budget'], [3, 'Events'], [4, 'Bestätigen']]);
+
+  function wizEnsureEvents() {
+    const b = parseMoney(wiz.budget);
+    const key = `${wiz.seed}|${b}|${wiz.label}|${S().eventLevel}|${S().eventIncome}`;
+    if (wiz.eventsFor !== key) {
+      wiz.events = generateEvents(isFinite(b) ? b : 0, wiz.label, wiz.seed);
+      wiz.eventsFor = key;
+    }
+    return wiz.events;
   }
 
   function wizardCalc() {
     const rows = ledger();
     const prev = rows[rows.length - 1];
     const newIdx = rows.length;
-    const items = wiz.items.filter((i) => i.on && i.amount > 0).map((i) => {
-      const total = (i.dir === 'in' ? 1 : -1) * round(i.amount);
-      const parts = Math.max(1, Math.floor(i.parts || 1));
-      const sp = parts > 1 ? split(total, 100 / parts, parts - 1) : { now: total, sched: [] };
-      return { ...i, total, parts, now: sp.now, sched: sp.sched.map((x) => ({ offset: x.offset + 1, amount: x.amount })) };
-    });
-    const fixedNow = items.reduce((a, i) => a + i.now, 0);
-    const interest = wiz.first ? [] : closingInterest(prev);
+    const openPrev = wiz.first ? [] : seasonEvents(prev.s).filter((e) => e.status !== 'done');
+    const openPrevSum = openPrev.reduce((a, e) => a + e.amount, 0);
+    const interest = wiz.first ? [] : closingInterest(prev ? { ...prev, endNet: prev.endNet + openPrevSum } : prev);
     const interestSum = interest.reduce((a, i) => a + i.amount, 0);
     const endBefore = wiz.first ? 0 : prev.endNet;
-    const restAfter = endBefore + fixedNow + interestSum;
-    const carryNet = wiz.first ? (isFinite(parseMoney(wiz.opening)) ? parseMoney(wiz.opening) : 0) : carry(restAfter);
+    const restAfter = endBefore + openPrevSum + interestSum;
+    const opening = parseMoney(wiz.opening);
+    const carryNet = wiz.first ? (isFinite(opening) ? opening : 0) : carry(restAfter);
     const rates = wiz.first ? [] : dueRates(newIdx);
     const ratesSum = rates.reduce((a, r) => a + r.net, 0);
     const budget = parseMoney(wiz.budget);
     const b = isFinite(budget) ? budget : 0;
-    const start = carryNet + b + ratesSum;
-    return { rows, prev, items, fixedNow, interest, interestSum, endBefore, restAfter, carryNet, rates, ratesSum, budget, start };
+    const events = wiz.step >= 3 ? wizEnsureEvents() : [];
+    const startEvents = events.filter((e) => e.start);
+    const startSum = startEvents.reduce((a, e) => a + e.amount, 0);
+    const laterSum = events.filter((e) => !e.start).reduce((a, e) => a + e.amount, 0);
+    const start = carryNet + b + ratesSum + startSum;
+    return { rows, prev, openPrev, openPrevSum, interest, interestSum, endBefore, restAfter, carryNet, rates, ratesSum, budget, events, startEvents, startSum, laterSum, start };
+  }
+
+  function eventListHtml(events, { checkable = false, gameDate = '' } = {}) {
+    if (!events.length) return '<p class="empty">Keine Events.</p>';
+    let html = '';
+    let month = '';
+    for (const ev of events) {
+      const m = ev.date.slice(0, 7);
+      if (m !== month) {
+        month = m;
+        const [yy, mm] = m.split('-');
+        html += `<li class="ev-month">${MONTHS[Number(mm) - 1]} ${yy}</li>`;
+      }
+      const due = checkable && gameDate && ev.status !== 'done' && ev.date <= gameDate;
+      html += `
+        <li class="ev ${ev.status === 'done' ? 'done' : ''} ${due ? 'due' : ''} ${ev.amount > 0 ? 'plus' : ''}">
+          ${checkable
+            ? `<label class="ev-check" title="${ev.status === 'done' ? 'Wieder öffnen' : 'Abhaken und abziehen'}"><input type="checkbox" data-event="${ev.id}" ${ev.status === 'done' ? 'checked' : ''} aria-label="${esc(ev.title)} am ${fmtDay(ev.date)} ${ev.amount < 0 ? 'abziehen' : 'gutschreiben'}"><span>${icon('check')}</span></label>`
+            : `<span class="ev-dot" aria-hidden="true"></span>`}
+          <span class="ev-date">${fmtDayShort(ev.date)}${ev.start ? '<small>Saisonstart</small>' : ''}</span>
+          <span class="ev-body"><b>${esc(ev.title)}</b><small>${esc(ev.desc)}</small></span>
+          <span class="ev-cat">${esc(ev.cat)}${due ? '<em>fällig</em>' : ''}</span>
+          <span class="num ev-amt ${cls(ev.amount)}">${eur(ev.amount, true)}</span>
+        </li>`;
+    }
+    return `<ul class="ev-list">${html}</ul>`;
   }
 
   function renderWizard() {
     const el = $('#view-saison');
     if (!wiz) initWizard();
     const c = wizardCalc();
-    const steps = wiz.first ? [[3, 'Budget'], [4, 'Bestätigen']] : [[1, 'Rückblick'], [2, 'Fixkosten'], [3, 'Neues Budget'], [4, 'Bestätigen']];
+    const steps = wizSteps();
     const pos = steps.findIndex(([n]) => n === wiz.step);
     let panel = '';
 
     if (wiz.step === 1) {
       const p = c.prev;
       const sales = p.txs.filter((t) => t.type === 'sale'), buys = p.txs.filter((t) => t.type === 'purchase');
+      const evDone = seasonEvents(p.s).filter((e) => e.status === 'done');
       panel = `
         <div class="eyebrow">Schritt 1 · Rückblick</div>
         <h2 style="margin:8px 0 14px">Saison ${esc(p.s.label)} abschließen</h2>
@@ -1472,37 +1697,14 @@
           <div><dt>Differenz</dt><dd class="${cls(p.endNet - p.endGross)}">${eur(p.endNet - p.endGross, true)}</dd></div>
           <div><dt>Verkäufe</dt><dd>${sales.length} · ${eur(sales.reduce((a, t) => a + t.gross, 0))}</dd></div>
           <div><dt>Käufe</dt><dd>${buys.length} · ${eur(-buys.reduce((a, t) => a + t.gross, 0))}</dd></div>
-          <div><dt>Abgaben gesamt</dt><dd class="neg">${eur(-p.ded)}</dd></div>
-        </dl>`;
+          <div><dt>Events abgezogen</dt><dd class="${cls(evDone.reduce((a, e) => a + e.amount, 0))}">${evDone.length} · ${eur(evDone.reduce((a, e) => a + e.amount, 0), true)}</dd></div>
+        </dl>
+        ${c.openPrev.length ? `<div class="alert warn" style="margin-top:16px">${icon('warn')}<div><b>${c.openPrev.length} Event(s) noch nicht abgehakt</b> (${eur(c.openPrevSum, true)}). Sie werden beim Saisonabschluss automatisch gebucht.</div></div>
+          <div class="tile" style="margin-top:10px;transform:none;box-shadow:none">${eventListHtml(c.openPrev)}</div>` : ''}
+        ${c.interest.length ? `<div class="sum-box">${c.interest.map((i) => `<div class="r-line"><span>${esc(i.label)}</span><span class="num neg">${eur(i.amount, true)}</span></div>`).join('')}</div>` : ''}`;
     } else if (wiz.step === 2) {
       panel = `
-        <div class="eyebrow">Schritt 2 · Jährliche Fixkosten</div>
-        <h2 style="margin:8px 0 6px">Was fällt zum Saisonende an?</h2>
-        <p class="small muted" style="margin:0 0 12px">Vorschläge aus den Einstellungen. Beträge gelten nur für diesen Wechsel. Große Posten (z. B. Stadionausbau) kannst du auf mehrere Saisons verteilen.</p>
-        <div style="overflow-x:auto">
-        <table class="item-table">
-          <thead><tr><th></th><th>Posten</th><th>Art</th><th>Betrag</th><th>Saisons</th></tr></thead>
-          <tbody>
-            ${wiz.items.map((i) => `
-              <tr class="${i.on ? '' : 'off'}">
-                <td><input type="checkbox" data-wi="${i.id}" data-k="on" ${i.on ? 'checked' : ''} aria-label="${esc(i.name)} berücksichtigen"></td>
-                <td class="name">${i.tpl ? esc(i.name) : `<input class="input" data-wi="${i.id}" data-k="name" value="${esc(i.name)}" aria-label="Bezeichnung">`}</td>
-                <td><select class="input" data-wi="${i.id}" data-k="dir" aria-label="Art"><option value="out" ${i.dir === 'out' ? 'selected' : ''}>Ausgabe</option><option value="in" ${i.dir === 'in' ? 'selected' : ''}>Einnahme</option></select></td>
-                <td><input class="input money" data-wi="${i.id}" data-k="amount" data-money inputmode="decimal" value="${fmtInputMoney(i.amount)}" aria-label="Betrag"></td>
-                <td><input class="input" data-wi="${i.id}" data-k="parts" inputmode="numeric" value="${i.parts}" style="max-width:70px" aria-label="Auf Saisons verteilen"></td>
-              </tr>`).join('')}
-          </tbody>
-        </table></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-          <button type="button" class="btn small" data-action="wiz-add" data-name="Stadionausbau">${icon('plus')}Stadionausbau</button>
-          <button type="button" class="btn small" data-action="wiz-add" data-name="Preisgeld">${icon('plus')}Preisgeld</button>
-          <button type="button" class="btn small" data-action="wiz-add" data-name="Weiterer Posten">${icon('plus')}Weiterer Posten</button>
-        </div>
-        ${c.interest.length ? `<div class="sum-box">${c.interest.map((i) => `<div class="r-line"><span>${esc(i.label)}</span><span class="num neg">${eur(i.amount, true)}</span></div>`).join('')}</div>` : ''}
-        <div class="sum-box" id="wizSum2">${wizSum2(c)}</div>`;
-    } else if (wiz.step === 3) {
-      panel = `
-        <div class="eyebrow">Schritt ${wiz.first ? 1 : 3} · Neues FC27-Budget</div>
+        <div class="eyebrow">Schritt ${pos + 1} · Neues FC27-Budget</div>
         <h2 style="margin:8px 0 14px">${wiz.first ? 'Erste Saison anlegen' : 'Was teilt dir FC27 zu?'}</h2>
         <form id="wizBudget" class="form-grid" novalidate>
           ${field('wlabel', 'Saison', { value: wiz.label, w: 'w2', attrs: 'autocomplete="off"' })}
@@ -1511,20 +1713,36 @@
           <button type="submit" hidden tabindex="-1" aria-hidden="true"></button>
         </form>
         ${c.rates.length ? `<div class="sum-box"><div class="small muted" style="margin-bottom:4px">Fällige Raten in der neuen Saison</div>${c.rates.map((r) => `<div class="r-line"><span>${esc(r.title)}</span><span class="num ${cls(r.net)}">${eur(r.net, true)}</span></div>`).join('')}</div>` : ''}`;
+    } else if (wiz.step === 3) {
+      const costs = c.events.filter((e) => e.amount < 0), incomes = c.events.filter((e) => e.amount > 0);
+      const b = isFinite(c.budget) && c.budget > 0 ? c.budget : 0;
+      panel = `
+        <div class="eyebrow">Schritt ${pos + 1} · Event-Plan</div>
+        <h2 style="margin:8px 0 6px">Was dich in ${esc(wiz.label)} erwartet</h2>
+        <p class="small muted" style="margin:0 0 12px">Ausgewürfelt passend zu deinem Budget. Events am 01.07. werden beim Start sofort abgezogen, der Rest kommt über die Saison – du hakst sie ab, wenn du im Spiel beim Datum bist.</p>
+        <dl class="wiz-grid">
+          <div><dt>Kosten-Events</dt><dd class="neg">${costs.length} · ${eur(costs.reduce((a, e) => a + e.amount, 0))}</dd></div>
+          <div><dt>Einnahmen-Events</dt><dd class="pos">${incomes.length} · ${eur(incomes.reduce((a, e) => a + e.amount, 0), true)}</dd></div>
+          <div><dt>Anteil am Budget</dt><dd>${b ? nf1.format((-costs.reduce((a, e) => a + e.amount, 0) / b) * 100) + ' %' : '–'}</dd></div>
+        </dl>
+        <div style="margin-top:14px">${eventListHtml(c.events)}</div>
+        <button type="button" class="btn small" data-action="wiz-reroll" style="margin-top:12px">${icon('auto')}Anders würfeln</button>`;
     } else {
       panel = `
-        <div class="eyebrow">Schritt ${wiz.first ? 2 : 4} · Bestätigen</div>
+        <div class="eyebrow">Schritt ${pos + 1} · Bestätigen</div>
         <h2 style="margin:8px 0 14px">Saison ${esc(wiz.label)} starten</h2>
         <div class="sum-box">
           ${wiz.first ? `<div class="r-line"><span>Startsaldo</span><span class="num ${cls(c.carryNet)}">${eur(c.carryNet, true)}</span></div>` : `
             <div class="r-line"><span>Endstand ${esc(c.prev.s.label)}</span><span class="num ${cls(c.endBefore)}">${eur(c.endBefore)}</span></div>
-            ${c.items.map((i) => `<div class="r-line"><span>${esc(i.name)}${i.parts > 1 ? ` (1/${i.parts})` : ''}</span><span class="num ${cls(i.now)}">${eur(i.now, true)}</span></div>`).join('')}
+            ${c.openPrev.length ? `<div class="r-line"><span>Offene Events ${esc(c.prev.s.label)} (${c.openPrev.length})</span><span class="num ${cls(c.openPrevSum)}">${eur(c.openPrevSum, true)}</span></div>` : ''}
             ${c.interest.map((i) => `<div class="r-line"><span>${esc(i.label)}</span><span class="num neg">${eur(i.amount, true)}</span></div>`).join('')}
-            <div class="r-line"><span><b>Restbudget nach Fixkosten</b></span><span class="num ${cls(c.restAfter)}"><b>${eur(c.restAfter)}</b></span></div>
+            <div class="r-line"><span><b>Restbudget Vorsaison</b></span><span class="num ${cls(c.restAfter)}"><b>${eur(c.restAfter)}</b></span></div>
             ${c.carryNet !== c.restAfter ? `<div class="r-line muted-line"><span>Übertrag laut Einstellung</span><span class="num">${eur(c.carryNet)}</span></div>` : ''}`}
           <div class="r-line"><span>+ Neues Transferbudget FC27</span><span class="num">${eur(isFinite(c.budget) ? c.budget : 0, true)}</span></div>
           ${c.rates.length ? `<div class="r-line"><span>Fällige Raten</span><span class="num ${cls(c.ratesSum)}">${eur(c.ratesSum, true)}</span></div>` : ''}
+          <div class="r-line"><span>Events zum Saisonstart (${c.startEvents.length})</span><span class="num ${cls(c.startSum)}">${eur(c.startSum, true)}</span></div>
           <div class="r-line total"><span>= Start-Budget realistisch</span><span class="num ${cls(c.start)}">${eur(c.start)}</span></div>
+          <div class="r-line muted-line"><span>Noch geplant über die Saison</span><span class="num">${eur(c.laterSum, true)}</span></div>
         </div>
         <p class="small muted" style="margin-top:12px">${wiz.first ? '' : `Saison ${esc(c.prev.s.label)} wird archiviert und bleibt im Protokoll einsehbar. `}Ingame startest du mit ${eur(isFinite(c.budget) ? c.budget : 0)} – so wie FC27 es anzeigt.</p>`;
     }
@@ -1533,7 +1751,7 @@
     el.innerHTML = `
       <div class="view-head"><div><div class="eyebrow">Assistent</div><h1>${wiz.first ? 'Erste Saison' : 'Neue Saison starten'}</h1></div></div>
       <ol class="wiz-steps" style="--n:${steps.length}">
-        ${steps.map(([n, l], i) => `<li class="wiz-step ${i < pos ? 'done' : i === pos ? 'active' : ''}" ${i === pos ? 'aria-current="step"' : ''}><b>${i < pos ? '✓' : i + 1}</b><span>${l}</span></li>`).join('')}
+        ${steps.map(([, l], i) => `<li class="wiz-step ${i < pos ? 'done' : i === pos ? 'active' : ''}" ${i === pos ? 'aria-current="step"' : ''}><b>${i < pos ? '✓' : i + 1}</b><span>${l}</span></li>`).join('')}
       </ol>
       <article class="tile span-12 wiz-panel" style="transform:none">
         ${panel}
@@ -1543,7 +1761,7 @@
         </div>
       </article>`;
 
-    if (wiz.step === 3) {
+    if (wiz.step === 2) {
       const f = $('#wizBudget');
       f.addEventListener('input', () => { wiz.label = f.elements.wlabel.value; wiz.budget = f.elements.wbudget.value; if (f.elements.wopening) wiz.opening = f.elements.wopening.value; });
       f.addEventListener('submit', (e) => { e.preventDefault(); wizNext(); });
@@ -1551,16 +1769,8 @@
     }
   }
 
-  function wizSum2(c) {
-    return `
-      <div class="r-line"><span>Endstand vorher</span><span class="num ${cls(c.endBefore)}">${eur(c.endBefore)}</span></div>
-      <div class="r-line"><span>Fixkosten &amp; Einnahmen (Saldo)</span><span class="num ${cls(c.fixedNow)}">${eur(c.fixedNow, true)}</span></div>
-      ${c.interestSum ? `<div class="r-line"><span>Zinsen</span><span class="num neg">${eur(c.interestSum, true)}</span></div>` : ''}
-      <div class="r-line total"><span>Restbudget nach Fixkosten</span><span class="num ${cls(c.restAfter)}">${eur(c.restAfter)}</span></div>`;
-  }
-
   function wizNext() {
-    if (wiz.step === 3) {
+    if (wiz.step === 2) {
       const f = $('#wizBudget');
       const b = parseMoney(f.elements.wbudget.value);
       const label = f.elements.wlabel.value.trim();
@@ -1576,49 +1786,124 @@
     }
     wiz.step = Math.min(4, wiz.step + 1);
     renderWizard();
+    window.scrollTo({ top: 0 });
   }
 
   function wizConfirm() {
     const c = wizardCalc();
-    if (!isFinite(c.budget) || c.budget < 0) { wiz.step = 3; renderWizard(); return; }
+    if (!isFinite(c.budget) || c.budget < 0) { wiz.step = 2; renderWizard(); return; }
     snapshot();
     const now = Date.now();
-    const newSeason = { id: uid(), label: wiz.label.trim(), grossBudget: round(c.budget), opening: wiz.first ? round(c.carryNet) : 0, ts: now };
+    const newSeason = {
+      id: uid(), label: wiz.label.trim(), grossBudget: round(c.budget), opening: wiz.first ? round(c.carryNet) : 0, ts: now,
+      events: wizEnsureEvents().map((e) => ({ ...e })), gameDate: isoDate(seasonDate('07-01', seasonStartYear(wiz.label))),
+    };
     let ts = now;
     if (!wiz.first) {
-      const prevId = c.prev.s.id;
-      const single = c.items.filter((i) => i.parts <= 1);
-      const spread = c.items.filter((i) => i.parts > 1);
-      const lines = [
-        ...single.map((i) => ({ label: i.name, amount: i.now })),
-        ...spread.map((i) => ({ label: `${i.name} (1/${i.parts}, eigener Eintrag)`, amount: i.now, muted: true })),
-        ...c.interest.map((i) => ({ label: i.label, amount: i.amount })),
-      ];
-      const singleSum = single.reduce((a, i) => a + i.now, 0);
+      const prevS = c.prev.s;
+      for (const ev of c.openPrev) setEventDone(prevS, ev, true, { auto: true, ts: ts++, nextSeasonId: newSeason.id });
       state.txs.push({
-        id: uid(), seasonId: prevId, ts: ts++, type: 'close', title: `Saisonabschluss ${c.prev.s.label}`,
-        sub: `Fixkosten, Einnahmen & Zinsen · weiter mit ${newSeason.label}`, gross: 0,
-        net: singleSum + c.interestSum, total: singleSum + c.interestSum, opsNet: singleSum, interestNet: c.interestSum,
-        lines, nextSeasonId: newSeason.id,
+        id: uid(), seasonId: prevS.id, ts: ts++, type: 'close', title: `Saisonabschluss ${prevS.label}`,
+        sub: `weiter mit ${newSeason.label}`, gross: 0,
+        net: c.interestSum, total: c.interestSum, opsNet: 0, interestNet: c.interestSum,
+        lines: [
+          ...(c.openPrev.length ? [{ label: `${c.openPrev.length} offene Event(s) automatisch gebucht`, amount: c.openPrevSum, muted: true }] : []),
+          ...c.interest.map((i) => ({ label: i.label, amount: i.amount })),
+          { label: `Neues FC27-Budget ${newSeason.label}`, amount: newSeason.grossBudget, muted: true },
+        ],
+        nextSeasonId: newSeason.id,
       });
-      for (const i of spread) {
-        state.txs.push({
-          id: uid(), seasonId: prevId, ts: ts++, type: i.dir === 'in' ? 'income' : 'expense', title: i.name,
-          sub: `Saisonwechsel · verteilt auf ${i.parts} Saisons`, gross: 0, net: i.now, total: i.total, deferred: i.now - i.total,
-          lines: [{ label: i.name, amount: i.total }, { label: `Davon jetzt (1/${i.parts})`, amount: i.now, muted: true }],
-          schedule: i.sched, nextSeasonId: newSeason.id,
-        });
-      }
     }
     const newIdx = state.seasons.length;
     state.seasons.push(newSeason);
     for (const r of dueRates(newIdx)) {
       state.txs.push({ id: uid(), seasonId: newSeason.id, ts: ts++, auto: true, gross: 0, total: r.net, lines: [{ label: r.title, amount: r.net }], ...r });
     }
+    for (const ev of newSeason.events.filter((e) => e.start)) setEventDone(newSeason, ev, true, { auto: true, ts: ts++ });
     save();
     wiz = null;
-    toast(`Saison ${newSeason.label} gestartet.`, { label: 'Rückgängig', fn: undo });
-    go('dashboard');
+    toast(`Saison ${newSeason.label} gestartet – ${newSeason.events.filter((e) => !e.start).length} Events über die Saison geplant.`, { label: 'Rückgängig', fn: undo });
+    go('events');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Events der laufenden Saison
+  // ---------------------------------------------------------------------------
+  function renderEvents() {
+    const el = $('#view-events');
+    if (!state.seasons.length) { needSeason(el, 'Events'); return; }
+    const s = currentSeason();
+    const evs = seasonEvents(s);
+    if (!evs.length) {
+      el.innerHTML = `
+        <div class="view-head"><div><div class="eyebrow">Saison ${esc(s.label)}</div><h1>Events</h1></div></div>
+        <div class="alert info">${icon('calendar')}<div>Für diese Saison gibt es noch keinen Event-Plan. Er wird aus deinem FC27-Budget von <b>${eur(s.grossBudget)}</b> ausgewürfelt.</div><button type="button" class="btn small primary" data-action="events-create">Event-Plan erstellen</button></div>`;
+      return;
+    }
+    const done = evs.filter((e) => e.status === 'done');
+    const open = evs.filter((e) => e.status !== 'done');
+    const rows = ledger();
+    const row = rows[rows.length - 1];
+    const gd = s.gameDate || '';
+    const dueCount = gd ? open.filter((e) => e.date <= gd).length : 0;
+    const y = seasonStartYear(s.label);
+    el.innerHTML = `
+      <div class="view-head">
+        <div><div class="eyebrow">Saison ${esc(s.label)} · Vereinskalender</div><h1>Events</h1></div>
+      </div>
+      <p class="page-intro">Kommst du im Spiel an einem Datum vorbei, hak das Event ab – der Betrag wird sofort vom realistischen Budget abgezogen (oder gutgeschrieben). Versehentlich abgehakt? Einfach wieder aufmachen.</p>
+      <div class="bento">
+        <article class="tile span-8" style="transform:none">
+          <div class="tile-head"><h2>Spieldatum</h2><span class="tile-kicker">wo bist du gerade in FC27?</span></div>
+          <form class="gd-form" id="gameDateForm">
+            <label class="field" style="grid-column:auto"><span>Datum im Spiel</span>
+              <input class="input" type="date" name="gd" value="${esc(gd)}" min="${y}-07-01" max="${y + 1}-06-30"></label>
+            <button type="submit" class="btn primary">${icon('check')}Alles bis dahin abhaken${dueCount ? ` (${dueCount})` : ''}</button>
+          </form>
+          <p class="small muted" style="margin-top:8px">Das Datum speichert sich. Offene Events bis dahin werden als <b>fällig</b> markiert.</p>
+        </article>
+        <article class="tile" style="transform:none">
+          <div class="tile-head"><h2>Stand</h2><span class="tile-kicker">${done.length}/${evs.length} erledigt</span></div>
+          <ul class="stat-list">
+            <li><span>Bereits abgezogen</span><span class="num ${cls(done.reduce((a, e) => a + e.amount, 0))}">${eur(done.reduce((a, e) => a + e.amount, 0), true)}</span></li>
+            <li><span>Noch offen</span><span class="num ${cls(openEventsSum(s))}">${eur(openEventsSum(s), true)}</span></li>
+            <li><span>Budget nach allen Events</span><span class="num ${cls(row.endNet + openEventsSum(s))}"><b>${eur(row.endNet + openEventsSum(s))}</b></span></li>
+          </ul>
+        </article>
+      </div>
+      <article class="tile span-12" style="margin-top:16px;transform:none">
+        ${eventListHtml(evs, { checkable: true, gameDate: gd })}
+      </article>`;
+    const f = $('#gameDateForm');
+    f.addEventListener('change', (e) => { if (e.target.name === 'gd') { s.gameDate = e.target.value; save({ silent: true }); renderEvents(); } });
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const d = f.elements.gd.value;
+      if (!d) { toast('Bitte zuerst ein Spieldatum wählen.'); return; }
+      s.gameDate = d;
+      const due = seasonEvents(s).filter((ev) => ev.status !== 'done' && ev.date <= d);
+      if (!due.length) { save({ silent: true }); toast('Bis zu diesem Datum ist alles erledigt.'); renderEvents(); return; }
+      snapshot();
+      let ts = Date.now();
+      due.forEach((ev) => setEventDone(s, ev, true, { ts: ts++ }));
+      save();
+      renderEvents();
+      toast(`${due.length} Event(s) bis ${fmtDay(d)} gebucht (${eur(due.reduce((a, ev) => a + ev.amount, 0), true)}).`, { label: 'Rückgängig', fn: undo });
+    });
+  }
+
+  function onEventToggle(e) {
+    const t = e.target;
+    if (!t.matches?.('input[data-event]')) return;
+    const s = currentSeason();
+    const ev = seasonEvents(s).find((x) => x.id === t.dataset.event);
+    if (!ev) return;
+    snapshot();
+    setEventDone(s, ev, t.checked);
+    if (t.checked && (!s.gameDate || s.gameDate < ev.date)) s.gameDate = ev.date;
+    save();
+    toast(t.checked ? `${ev.title}: ${eur(ev.amount, true)} gebucht.` : `${ev.title} wieder offen.`, { label: 'Rückgängig', fn: undo });
+    renderView(currentView);
   }
 
   // ---------------------------------------------------------------------------
@@ -1721,7 +2006,8 @@
     const children = state.txs.filter((x) => x.parentId === id);
     const loanRelated = t.type === 'loan' ? state.txs.filter((x) => x.loanId === t.loanId && x.id !== id) : [];
     let text = `„${esc(t.title)}“ (${eur(t.net, true)}) wirklich löschen?`;
-    if (t.type === 'close') text += ' Die Fixkosten dieses Saisonwechsels werden damit zurückgenommen.';
+    if (t.type === 'close') text += ' Die Zinsen dieses Saisonwechsels werden damit zurückgenommen.';
+    if (t.type === 'event') text += ' Das Event wird im Kalender wieder als offen markiert.';
     if (children.length) text += ` Die ${children.length} bereits gebuchte(n) Rate(n) werden mitgelöscht.`;
     if (loanRelated.length) text += ` Zugehörige Tilgungen (${loanRelated.length}) werden mitgelöscht.`;
     if (t.schedule?.length) text += ' Künftige Raten entfallen.';
@@ -1794,7 +2080,6 @@
     const row = (key, label, hint, suffix = '%') => `
       <div class="set-row"><label for="s-${key}">${label}${hint ? `<small>${hint}</small>` : ''}</label>
         <div class="input-affix"><input class="input" id="s-${key}" data-setting="${key}" inputmode="decimal" value="${fmtInputNum(s[key])}"><em>${suffix}</em></div></div>`;
-    const tplSum = state.templates.filter((t) => t.active).reduce((a, t) => a + (t.dir === 'in' ? t.amount : -t.amount), 0);
     const backupState = !Backup.supported
       ? '<p class="small muted">Dein Browser unterstützt keine Auto-Backup-Datei (nur Chrome/Edge). Nutze den JSON-Export.</p>'
       : Backup.handle
@@ -1848,24 +2133,19 @@
           ${row('ffpLimit', 'Grenze Ausgaben/Einnahmen', '100 % = nicht mehr ausgeben als einnehmen')}
         </article>
         <article class="tile wide reveal" style="--i:4">
-          <div class="tile-head"><h2>Jährliche Fixkosten-Vorlagen</h2><span class="tile-kicker">Vorschläge beim Saisonwechsel</span></div>
-          <p class="small muted">Richtwerte – an dein Spiel anpassen. Aktive Posten sind im Assistenten „Neue Saison starten“ vorausgewählt und dort pro Saison änderbar.</p>
-          <div style="overflow-x:auto">
-          <table class="mini-table" style="min-width:560px">
-            <thead><tr><th>Bezeichnung</th><th>Art</th><th>Betrag / Saison</th><th>Aktiv</th><th></th></tr></thead>
-            <tbody>
-              ${state.templates.map((t) => `<tr>
-                <td><input class="input" data-tpl="${t.id}" data-k="name" value="${esc(t.name)}" aria-label="Bezeichnung"></td>
-                <td><select class="input" data-tpl="${t.id}" data-k="dir" aria-label="Art"><option value="out" ${t.dir === 'out' ? 'selected' : ''}>Ausgabe</option><option value="in" ${t.dir === 'in' ? 'selected' : ''}>Einnahme</option></select></td>
-                <td><input class="input money" data-tpl="${t.id}" data-k="amount" data-money inputmode="decimal" value="${fmtInputMoney(t.amount)}" aria-label="Betrag"></td>
-                <td><input type="checkbox" data-tpl="${t.id}" data-k="active" ${t.active ? 'checked' : ''} aria-label="aktiv" style="width:20px;height:20px;accent-color:var(--violet)"></td>
-                <td><button type="button" class="btn small ghost" data-action="tpl-del" data-id="${t.id}" aria-label="Vorlage löschen">${icon('trash')}</button></td></tr>`).join('')}
-            </tbody>
-          </table></div>
-          <div class="small" style="margin-top:10px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
-            <button type="button" class="btn small" data-action="tpl-add">${icon('plus')}Vorlage</button>
-            <span>Saldo aktiver Vorlagen pro Saisonwechsel: <b id="tplSum" class="num ${cls(tplSum)}">${eur(tplSum, true)}</b></span>
+          <div class="tile-head"><h2>Saison-Events</h2><span class="tile-kicker">${EVENT_CATALOG.length} Events im Katalog</span></div>
+          <p class="small muted">Jede Saison wird aus diesem Katalog ein Plan passend zum FC27-Budget ausgewürfelt. Große Posten kommen nur bei großem Budget. Die Härte gilt für neu erstellte Pläne.</p>
+          <div class="radio-list level-list">
+            ${Object.entries(EVENT_LEVELS).map(([k, l]) => `<label class="radio-card"><input type="radio" name="eventLevel" value="${k}" ${s.eventLevel === k ? 'checked' : ''}><span><b>${l.label}</b><small>Kosten ca. ${nf0.format(l.range[0] * 100)}–${nf0.format(l.range[1] * 100)} % vom Budget</small></span></label>`).join('')}
           </div>
+          <div class="set-row" style="margin-top:10px"><label>Einnahmen-Events<small>Ab und zu ein Plus: Testspiel-Gage, Trikot-Boom, Sponsor-Prämie …</small></label>
+            <label class="toggle" style="justify-self:end"><input type="checkbox" data-setting-bool="eventIncome" ${s.eventIncome ? 'checked' : ''}><span class="sw"></span><span class="t">Aktiv</span></label></div>
+          <details style="margin-top:10px"><summary class="small" style="cursor:pointer;color:var(--violet-ink);font-weight:600">Katalog ansehen</summary>
+            <div style="overflow-x:auto;margin-top:8px"><table class="mini-table" style="min-width:560px">
+              <thead><tr><th>Event</th><th>Wann</th><th>Anteil</th><th>Chance</th><th>ab Budget</th></tr></thead>
+              <tbody>${EVENT_CATALOG.map((e) => `<tr><td><b>${esc(e.title)}</b><br><span class="small muted">${esc(e.cat)}${e.income ? ' · Einnahme' : ''}</span></td><td class="small">${e.start ? 'Saisonstart 01.07.' : `${e.win[0].split('-').reverse().join('.')}. – ${e.win[1].split('-').reverse().join('.')}.`}</td><td class="small">${e.flat ? eur(e.flat) : `${nf1.format(e.pct[0])}–${nf1.format(e.pct[1])} %`}</td><td class="small">${nf0.format((e.chance ?? 1) * 100)} %</td><td class="small">${e.minBudget ? eurShort(e.minBudget) + ' €' : '–'}</td></tr>`).join('')}</tbody>
+            </table></div>
+          </details>
         </article>
         <article class="tile wide reveal" style="--i:5">
           <div class="tile-head"><h2>Daten &amp; Sicherung</h2><span class="tile-kicker">${state.txs.length} Einträge · ${state.seasons.length} Saisons</span></div>
@@ -1905,6 +2185,8 @@
       s[t.dataset.settingBool] = t.checked; save({ silent: true });
     } else if (t.name === 'carryMode') {
       s.carryMode = t.value; save({ silent: true });
+    } else if (t.name === 'eventLevel') {
+      s.eventLevel = t.value; save({ silent: true });
     } else if (t.dataset.train) {
       const r = s.training.find((x) => x.id === t.dataset.train);
       if (!r) return;
@@ -1913,20 +2195,6 @@
       if (!isFinite(n) || n < 0) { t.classList.add('invalid'); return; }
       t.classList.remove('invalid');
       r[k] = n; save({ silent: true });
-    } else if (t.dataset.tpl) {
-      const r = state.templates.find((x) => x.id === t.dataset.tpl);
-      if (!r) return;
-      const k = t.dataset.k;
-      if (k === 'active') r.active = t.checked;
-      else if (k === 'amount') {
-        const n = parseMoney(t.value || '0');
-        if (!isFinite(n) || n < 0) { t.classList.add('invalid'); return; }
-        t.classList.remove('invalid'); r.amount = n;
-      } else r[k] = t.value;
-      save({ silent: true });
-      const sum = state.templates.filter((x) => x.active).reduce((a, x) => a + (x.dir === 'in' ? x.amount : -x.amount), 0);
-      const el = $('#tplSum');
-      if (el) { el.textContent = eur(sum, true); el.className = 'num ' + cls(sum); }
     }
   }
   function renderSettingsKeepScroll() {
@@ -1934,21 +2202,6 @@
     renderSettings();
     $$('#view-einstellungen .reveal').forEach((x) => x.classList.remove('reveal'));
     window.scrollTo(0, y);
-  }
-
-  // Assistent: Posten-Tabelle
-  function onWizardInput(e) {
-    const t = e.target;
-    if (!t.dataset.wi || !wiz) return;
-    const it = wiz.items.find((x) => x.id === t.dataset.wi);
-    if (!it) return;
-    const k = t.dataset.k;
-    if (k === 'on') { it.on = t.checked; t.closest('tr').classList.toggle('off', !t.checked); }
-    else if (k === 'amount') { const n = parseMoney(t.value || '0'); if (isFinite(n) && n >= 0) { it.amount = n; t.classList.remove('invalid'); } else t.classList.add('invalid'); }
-    else if (k === 'parts') { const n = parseInt(t.value, 10); it.parts = n >= 1 && n <= 30 ? n : 1; }
-    else it[k] = t.value;
-    const box = $('#wizSum2');
-    if (box) box.innerHTML = wizSum2(wizardCalc());
   }
 
   // ---------------------------------------------------------------------------
@@ -2029,8 +2282,18 @@
       case 'donut-scope': state.ui.donutScope = a.dataset.scope; save({ silent: true }); renderDashboard(); break;
       case 'sort-toggle': state.ui.sortDesc = !state.ui.sortDesc; save({ silent: true }); renderLog(); break;
       case 'wiz-next': wizNext(); break;
-      case 'wiz-back': { const steps = wiz.first ? [3, 4] : [1, 2, 3, 4]; wiz.step = steps[Math.max(0, steps.indexOf(wiz.step) - 1)]; renderWizard(); break; }
-      case 'wiz-add': wiz.items.push({ id: uid(), name: a.dataset.name, dir: a.dataset.name === 'Preisgeld' ? 'in' : 'out', amount: 0, on: true, parts: 1, tpl: false }); renderWizard(); break;
+      case 'wiz-back': { const steps = wizSteps().map(([n]) => n); wiz.step = steps[Math.max(0, steps.indexOf(wiz.step) - 1)]; renderWizard(); break; }
+      case 'wiz-reroll': wiz.seed = uid(); renderWizard(); break;
+      case 'events-create': {
+        const cs = currentSeason();
+        snapshot();
+        cs.events = generateEvents(cs.grossBudget, cs.label, uid());
+        cs.gameDate ||= isoDate(seasonDate('07-01', seasonStartYear(cs.label)));
+        save();
+        toast(`Event-Plan erstellt: ${cs.events.length} Events.`, { label: 'Rückgängig', fn: undo });
+        go('events');
+        break;
+      }
       case 'wiz-confirm': wizConfirm(); break;
       case 'export-json': exportJSON(); break;
       case 'export-csv': exportCSV(); break;
@@ -2041,8 +2304,6 @@
       case 'backup-restore': Backup.restoreFromHandle(); break;
       case 'train-add': S().training.push({ id: uid(), maxAge: 23, pct: 0, flat: 0 }); save({ silent: true }); renderSettingsKeepScroll(); break;
       case 'train-del': S().training = S().training.filter((x) => x.id !== a.dataset.id); save({ silent: true }); renderSettingsKeepScroll(); break;
-      case 'tpl-add': state.templates.push({ id: uid(), name: 'Neuer Posten', dir: 'out', amount: 0, active: true }); save({ silent: true }); renderSettingsKeepScroll(); break;
-      case 'tpl-del': state.templates = state.templates.filter((x) => x.id !== a.dataset.id); save({ silent: true }); renderSettingsKeepScroll(); break;
       case 'reset': {
         const ok = await confirmDialog({ title: 'Alles zurücksetzen', text: 'Löscht <b>alle Saisons, Einträge, Kredite und Einstellungen</b> in diesem Browser. Vorher am besten JSON exportieren.', ok: 'Endgültig löschen', danger: true, requireText: 'LÖSCHEN' });
         if (!ok) break;
@@ -2061,9 +2322,8 @@
   const settingsView = $('#view-einstellungen');
   settingsView.addEventListener('change', onSettingsChange);
   settingsView.addEventListener('input', (e) => { if (e.target.type !== 'checkbox' && e.target.type !== 'radio' && e.target.tagName !== 'SELECT') onSettingsChange(e); });
-  const wizView = $('#view-saison');
-  wizView.addEventListener('input', onWizardInput);
-  wizView.addEventListener('change', onWizardInput);
+  // Event-Häkchen (Dashboard + Events-Seite)
+  document.addEventListener('change', onEventToggle);
 
   // Geldfelder beim Verlassen hübsch formatieren
   document.addEventListener('focusout', (e) => {
